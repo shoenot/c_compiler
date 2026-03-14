@@ -74,7 +74,10 @@ impl Tokenizer {
     fn skip_whitespace(&mut self) {
         while let Some(&c) = self.chars.peek() {
             match c {
-                '\n' => {self.line += 1; self.chars.next(); self.current += 1},
+                '\n' => {
+                    self.line += 1; 
+                    self.chars.next(); 
+                    self.current = 0},
                 ' ' | '\r' | '\t' => {self.chars.next(); self.current += 1},
                 _ => break,
             }
@@ -102,28 +105,17 @@ impl Tokenizer {
             ';' => TokenType::Semicolon,
             other => {
                 if other.is_digit(10) {
-                    self.scan_constant(other)
+                    self.scan_constant(other)?
                 } else if other.is_ascii_alphabetic() || other == '_' {
                     self.scan_text(other)
                 } else {
-                    return Err(LexerError::InvalidCharacter(
-                            other, 
-                            Span {
-                                line_number: self.line,
-                                start_idx: self.current,
-                                end_idx:self.current
-                            })
-                    )
+                    return Err(LexerError::InvalidCharacter(other, self.make_span()))
                 }
             }
         };
         Ok(Some(Token {
             token_type,
-            location: Span {
-                line_number: self.line,
-                start_idx: self.start,
-                end_idx: self.current,
-            }
+            location: self.make_span(),
         }))
     }
 
@@ -131,12 +123,19 @@ impl Tokenizer {
             self.chars.peek().copied().unwrap_or('\0')
     }
 
-    fn scan_constant(&mut self, first: char) -> TokenType {
+    fn scan_constant(&mut self, first: char) -> Result<TokenType, LexerError> {
         let mut number = String::from(first);
-        while self.peek().is_digit(10) {
+        let nextchar = self.peek();
+
+        while nextchar.is_digit(10) {
             number.push(self.advance());
+        } 
+
+        if nextchar.is_ascii_alphabetic() {
+            return Err(LexerError::InvalidCharacter(nextchar, self.make_span()))
         }
-        TokenType::Constant(number.parse().unwrap())
+        number.parse().map(TokenType::Constant)
+            .map_err(|_| LexerError::IntegerOverflow(self.make_span()))
     }
 
     fn parse_keyword(&self, lexeme: &str) -> Option<TokenType> {
@@ -158,6 +157,14 @@ impl Tokenizer {
         match self.parse_keyword(&word) {
             Some(tokentype) => tokentype,
             None => TokenType::Identifier(word)
+        }
+    }
+
+    fn make_span(&mut self) -> Span {
+        Span { 
+            line_number: self.line,
+            start_idx: self.start,
+            end_idx: self.current,
         }
     }
 

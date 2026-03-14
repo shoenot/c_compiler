@@ -1,7 +1,7 @@
 mod driver;
 mod lexer;
 use clap::Parser;
-use std::path::PathBuf;
+use std::{path::PathBuf, process};
 use crate::driver::*;
 
 #[derive(Parser, Debug)]
@@ -20,11 +20,15 @@ struct Args {
 fn main() {
     let args = Args::parse();
     
-    if let Err(e) = run_preprocessor(args.input_file.clone()) {
-        eprintln!("{}", e);
-    }
+    let preprocessed = match run_preprocessor(args.input_file.clone()) {
+        Ok(pb) => pb,
+        Err(e) => {
+            eprintln!("{}", e);
+            process::exit(1)
+        },
+    };
 
-    if let Err(e) = run_compiler(args) {
+    if let Err(e) = run_compiler(preprocessed, args) {
         eprintln!("{}", e)
     }
 }

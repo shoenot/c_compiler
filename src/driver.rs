@@ -27,34 +27,36 @@ fn load_source(input_file: PathBuf) -> Result<String, std::io::Error> {
     Ok(source)
 }
 
-pub fn run_preprocessor(input_file: PathBuf) -> Result<(), DriverError> {
+pub fn run_preprocessor(input_file: PathBuf) -> Result<PathBuf, DriverError> {
     let mut output_file = input_file.clone();
     output_file.set_extension("i");
     match Command::new("gcc")
-        .args(["gcc", "-E", "-P", &input_file.to_str().unwrap(), "-o", &output_file.to_str().unwrap()])
+        .args(["-E", "-P", &input_file.to_str().unwrap(), "-o", &output_file.to_str().unwrap()])
         .output() {
             Ok(output) => {
                 if output.status.success() {
                     let stdout_str = String::from_utf8_lossy(&output.stdout).into_owned();
                     println!("{}", stdout_str);
-                    Ok(())
+                    return Ok(output_file);
                 } else {
                     let msg = String::from_utf8_lossy(&output.stderr).into_owned();
-                    Err(DriverError::PreprocessorError(msg))
+                    return Err(DriverError::PreprocessorError(msg));
                 }
             },
-            Err(e) => Err(DriverError::PreprocessorError(e.to_string()))
+            Err(e) => return Err(DriverError::PreprocessorError(e.to_string())),
         }
 }
 
-pub fn run_compiler(args: crate::Args) -> Result<(), Box<dyn Error>> {
-    let source = load_source(args.input_file.clone())?;
+pub fn run_compiler(preprocessed: PathBuf, args: crate::Args) -> Result<(), Box<dyn Error>> {
+    let source = load_source(preprocessed.clone())?;
     let mut tokenizer = Tokenizer::new(source);
     let tokens = tokenizer.tokenize();
     println!("{:?}", tokens);
     if args.lex {
+        std::fs::remove_file(preprocessed).ok().unwrap();
         return Ok(());
     } else {
+        std::fs::remove_file(preprocessed).ok().unwrap();
         todo!()
     }
 }
@@ -63,7 +65,7 @@ pub fn run_assembler(input_file: PathBuf) -> Result<(), DriverError> {
     let mut output_file = input_file.clone();
     output_file.set_extension("i");
     match Command::new("gcc")
-        .args(["gcc", &input_file.to_str().unwrap(), "-o", &output_file.to_str().unwrap()])
+        .args([&input_file.to_str().unwrap(), "-o", &output_file.to_str().unwrap()])
         .output() {
             Ok(output) => {
                 if output.status.success() {
