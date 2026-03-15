@@ -6,7 +6,6 @@ mod emit;
 use clap::Parser;
 use std::{path::PathBuf, process};
 use crate::driver::*;
-use std::process::ExitCode;
 
 #[derive(Parser, Debug)]
 struct Args {

@@ -68,7 +68,7 @@ impl Parser {
         match self.tokens.next() {
             None => Err(ParseError::UnexpectedEOF),
             Some(token) => {
-                self.current_span = token.location.clone();
+                self.current_span = token.location;
                 return Ok(token);
             }
         }

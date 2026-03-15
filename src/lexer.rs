@@ -1,5 +1,5 @@
 use std::{
-    fs::read_to_string, iter::Peekable, path::PathBuf, vec::IntoIter, fmt,
+    iter::Peekable, vec::IntoIter, fmt,
 };
 
 #[derive(Debug)]
@@ -19,19 +19,11 @@ impl fmt::Display for LexerError {
 
 impl std::error::Error for LexerError {}
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Span {
     pub line_number: usize,
     pub start_idx: usize,
     pub end_idx: usize,
-}
-
-impl Copy for Span { }
-
-impl Clone for Span {
-    fn clone(&self) -> Span {
-        *self
-    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
