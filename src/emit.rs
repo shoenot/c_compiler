@@ -5,11 +5,12 @@ use crate::{
 pub fn emit_program(program: ProgramAsm) -> String {
     let mut output = String::new();
     emit_function(program.function, &mut output);
+    output.push_str("\n.section .note.GNU-stack,\"\",@progbits");
     output
 }
 
 fn emit_function(function: FunctionAsm, output: &mut String) {
-    output.push_str(&function.name);
+    output.push_str(&format!("\t.globl {}\n{}:\n", function.name, function.name));
     for instruction in function.body {
        emit_instruction(instruction, output);
     }
