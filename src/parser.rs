@@ -6,7 +6,7 @@ use crate::lexer::*;
 
 #[derive(Debug)]
 pub enum ParseError {
-    UnexpectedToken(Span),
+    UnexpectedToken(TokenType, Span),
     UnexpectedEOF,
     ExpectedIdentifier(Span),
     ExpectedConstant(Span),
@@ -15,7 +15,7 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ParseError::UnexpectedToken(s) => write!(f, "Parse Error: unexpected token!\nLine: {}, Col: {}", s.line_number, s.start_idx),
+            ParseError::UnexpectedToken(t, s) => write!(f, "Parse Error: unexpected token! {:#?}\nLine: {}, Col: {}", t, s.line_number, s.start_idx),
             ParseError::UnexpectedEOF => write!(f, "Parse Error: unexpected EOF!"),
             ParseError::ExpectedIdentifier(s) => write!(f, "Parse Error: expected identifier!\nLine: {}, Col: {}", s.line_number, s.start_idx),
             ParseError::ExpectedConstant(s) => write!(f, "Parse Error: expected constant!\nLine: {}, Col: {}", s.line_number, s.start_idx),
@@ -79,7 +79,7 @@ impl Parser {
         if token.token_type == expected {
             Ok(token)
         } else {
-            Err(ParseError::UnexpectedToken(token.location))
+            Err(ParseError::UnexpectedToken(token.token_type, token.location))
         }
     }
 
@@ -99,8 +99,18 @@ impl Parser {
         }
     }
 
+    fn expect_eof(&mut self) -> Result<(), ParseError> {
+        let eof = self.tokens.peek();
+        match eof {
+            None => Ok(()),
+            Some(token) => Err(ParseError::UnexpectedToken(token.token_type.clone(), token.location)),
+        }
+    }
+        
+
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let function = self.parse_function()?;
+        self.expect_eof()?;
         Ok(Program {
             function
         })
@@ -114,6 +124,7 @@ impl Parser {
         self.expect(TokenType::CloseParen)?;
         self.expect(TokenType::OpenBrace)?;
         let body = self.parse_statement()?;
+        self.expect(TokenType::Semicolon)?;
         self.expect(TokenType::CloseBrace)?;
         Ok(Function {
             identifier, body

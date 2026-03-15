@@ -1,12 +1,12 @@
 use std::process::Command;
 use std::path::PathBuf;
 use std::error::Error;
-use std::fmt;
-use std::fs::read_to_string;
+use std::fs;
+use std::{fmt};
+use crate::codegen::gen_program;
 use crate::lexer::Tokenizer;
-use crate::parser::{
-    Parser, pretty_print
-};
+use crate::parser::{Parser, pretty_print};
+use crate::emit::emit_program;
 
 #[derive(Debug)]
 pub enum DriverError {
@@ -25,12 +25,12 @@ impl fmt::Display for DriverError {
 
 impl Error for DriverError {}
 
-fn load_source(input_file: PathBuf) -> Result<String, std::io::Error> {
-    let source = read_to_string(input_file)?;
+fn load_source(input_file: &PathBuf) -> Result<String, std::io::Error> {
+    let source = fs::read_to_string(input_file)?;
     Ok(source)
 }
 
-pub fn run_preprocessor(input_file: PathBuf) -> Result<PathBuf, DriverError> {
+pub fn run_preprocessor(input_file: &PathBuf) -> Result<PathBuf, DriverError> {
     let mut output_file = input_file.clone();
     output_file.set_extension("i");
     match Command::new("gcc")
@@ -50,28 +50,38 @@ pub fn run_preprocessor(input_file: PathBuf) -> Result<PathBuf, DriverError> {
         }
 }
 
-pub fn run_compiler(preprocessed: PathBuf, args: crate::Args) -> Result<(), Box<dyn Error>> {
-    let source = load_source(preprocessed.clone())?;
+pub fn run_compiler(preprocessed: &PathBuf, args: crate::Args) -> Result<(), Box<dyn Error>> {
+    let source = load_source(preprocessed)?;
     let mut tokenizer = Tokenizer::new(source);
     let tokens = tokenizer.tokenize()?;
-    std::fs::remove_file(preprocessed).ok().unwrap();
     if args.lex {
         println!("{:#?}", tokens);
         return Ok(());
     } 
+
     let mut parser = Parser::new(tokens);
     let program = parser.parse_program()?;
-    if args.parse {
+    if args.parsed {
         pretty_print(program);
         return Ok(())
-    } else {
-        todo!()
     }
+
+    let asm_program = gen_program(program);
+    if args.codegen {
+        println!("{:#?}", asm_program);
+        return Ok(())
+    } 
+    
+    let mut output_file = preprocessed.clone();
+    output_file.set_extension("s");
+    fs::write(&output_file, emit_program(asm_program))?;
+    std::fs::remove_file(preprocessed)?;
+    Ok(())
 }
 
-pub fn run_assembler(input_file: PathBuf) -> Result<(), DriverError> {
+pub fn run_assembler(input_file: &PathBuf) -> Result<(), DriverError> {
     let mut output_file = input_file.clone();
-    output_file.set_extension("i");
+    output_file.set_extension("");
     match Command::new("gcc")
         .args([&input_file.to_str().unwrap(), "-o", &output_file.to_str().unwrap()])
         .output() {

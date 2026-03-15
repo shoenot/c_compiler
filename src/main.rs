@@ -1,9 +1,12 @@
 mod driver;
 mod lexer;
 mod parser;
+mod codegen;
+mod emit;
 use clap::Parser;
 use std::{path::PathBuf, process};
 use crate::driver::*;
+use std::process::ExitCode;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -13,15 +16,16 @@ struct Args {
     #[arg(long)]
     lex: bool,
     #[arg(long)]
-    parse: bool,
+    parsed: bool,
     #[arg(long)]
     codegen: bool,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let input_file = args.input_file.clone();
     
-    let preprocessed = match run_preprocessor(args.input_file.clone()) {
+    let preprocessed = match run_preprocessor(&input_file) {
         Ok(pb) => pb,
         Err(e) => {
             eprintln!("{}", e);
@@ -29,7 +33,18 @@ fn main() {
         },
     };
 
-    if let Err(e) = run_compiler(preprocessed, args) {
-        eprintln!("{}", e)
+    if let Err(e) = run_compiler(&preprocessed, args) {
+        eprintln!("{}", e);
+        return Err(e);
     }
+
+    match run_assembler(&input_file) {
+        Ok(pb) => pb,
+        Err(e) => {
+            eprintln!("{}", e);
+            process::exit(1)
+        },
+    };
+
+    Ok(())
 }

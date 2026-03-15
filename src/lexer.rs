@@ -34,7 +34,7 @@ impl Clone for Span {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
     Identifier(String),
     OpenParen,
@@ -82,10 +82,7 @@ impl Tokenizer {
     fn skip_whitespace(&mut self) {
         while let Some(&c) = self.chars.peek() {
             match c {
-                '\n' => {
-                    self.line += 1; 
-                    self.chars.next(); 
-                    self.current = 0},
+                '\n' => { self.line += 1; self.chars.next(); self.current += 1},
                 ' ' | '\r' | '\t' => {self.chars.next(); self.current += 1},
                 _ => break,
             }
@@ -133,14 +130,13 @@ impl Tokenizer {
 
     fn scan_constant(&mut self, first: char) -> Result<TokenType, LexerError> {
         let mut number = String::from(first);
-        let nextchar = self.peek();
 
-        while nextchar.is_digit(10) {
+        while self.peek().is_ascii_digit() {
             number.push(self.advance());
         } 
 
-        if nextchar.is_ascii_alphabetic() {
-            return Err(LexerError::InvalidCharacter(nextchar, self.make_span()))
+        if self.peek().is_ascii_alphabetic() {
+            return Err(LexerError::InvalidCharacter(self.peek(), self.make_span()))
         }
         number.parse().map(TokenType::Constant)
             .map_err(|_| LexerError::IntegerOverflow(self.make_span()))

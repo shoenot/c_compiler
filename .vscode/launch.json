@@ -1,0 +1,22 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug executable 'c_compiler'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=c_compiler"
+                ]
+            },
+            "args": ["/home/shurjo/projects/compiler/tests/tests/chapter_1/invalid_parse/extra_junk.c"]
+        }
+        
+
+    ]
+}
