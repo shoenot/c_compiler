@@ -1,41 +1,80 @@
-use crate::{
-    codegen::{FunctionAsm, InstructionAsm, Operand, ProgramAsm, Register},
-};
+use crate::codegen::{AsmFunction, AsmInstruction, AsmProgram, Operand, Register, UnaryOp};
+use std::fmt;
 
-pub fn emit_program(program: ProgramAsm) -> String {
-    let mut output = String::new();
-    emit_function(program.function, &mut output);
-    output.push_str("\n.section .note.GNU-stack,\"\",@progbits");
-    output
+#[derive(Debug)]
+pub enum EmissionError {
+    UnresolvedPseudoRegister(String)
 }
 
-fn emit_function(function: FunctionAsm, output: &mut String) {
-    output.push_str(&format!("\t.globl {}\n{}:\n", function.name, function.name));
-    for instruction in function.body {
-       emit_instruction(instruction, output);
-    }
-}
-
-fn emit_instruction(instruction: InstructionAsm, output: &mut String) {
-    match instruction {
-        InstructionAsm::Mov(src, dst) => {
-            let src = emit_operand(src);
-            let dst = emit_operand(dst);
-            output.push_str(&format!("\tmov {src}, {dst}\n"));
-        },
-        InstructionAsm::Ret => {
-            output.push_str("\tret\n")
+impl fmt::Display for EmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            EmissionError::UnresolvedPseudoRegister(ident) => {
+                write!(f, "Unresolved Pseudo Register! {ident}")
+            }
         }
     }
 }
 
-fn emit_operand(operand: Operand) -> String {
+impl std::error::Error for EmissionError { }
+
+pub fn emit_program(program: AsmProgram) -> Result<String, EmissionError> {
+    let mut output = String::new();
+    emit_function(program.function, &mut output)?;
+    output.push_str("\n.section .note.GNU-stack,\"\",@progbits");
+    Ok(output)
+}
+
+fn emit_function(function: AsmFunction, output: &mut String) -> Result<(), EmissionError> {
+    output.push_str(&format!("\t.globl {}\n", function.name));
+    output.push_str(&format!("{}:\n", function.name));
+    output.push_str("\tpushq\t%rbp\n");
+    output.push_str("\tmovq\t%rsp,\t%rbp\n");
+    for instruction in function.body {
+       emit_instruction(instruction, output)?;
+    }
+    Ok(())
+}
+
+fn emit_instruction(instruction: AsmInstruction, output: &mut String) -> Result<(), EmissionError> {
+    match instruction {
+        AsmInstruction::Mov(src, dst) => {
+            let src = emit_operand(src)?;
+            let dst = emit_operand(dst)?;
+            output.push_str(&format!("\tmovl\t{src},\t{dst}\n"));
+        },
+        AsmInstruction::Ret => {
+            output.push_str("\tret\n")
+        },
+        AsmInstruction::Unary(unary_op, operand) => {
+            let dst = emit_operand(operand)?;
+            let op = emit_unary_op(unary_op);
+            output.push_str(&format!("\t{op}\t{dst}\n"));
+        },
+        AsmInstruction::AllocateStack(int) => {
+            output.push_str(&format!("\tsubq\t${int},\t%rsp\n"));
+        },
+    }
+    Ok(())
+}
+
+fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
     match operand {
-        Operand::Imm(value) => format!("${value}"),
+        Operand::Imm(value) => Ok(format!("${value}")),
         Operand::Reg(reg) => {
             match reg {
-                Register::EAX => String::from("%eax")
+                Register::AX => Ok(String::from("%eax")),
+                Register::R10 => Ok(String::from("%r10d")),
             }
         },
+        Operand::Stack(int) => Ok(format!("{int}(%rbp)")),
+        Operand::Pseudo(ident) => Err(EmissionError::UnresolvedPseudoRegister(ident)),
+    }
+}
+
+fn emit_unary_op(unary_op: UnaryOp) -> String {
+    match unary_op {
+        UnaryOp::Neg => String::from("negl"),
+        UnaryOp::Not => String::from("notl"),
     }
 }

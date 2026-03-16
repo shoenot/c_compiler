@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::error::Error;
 use std::fs;
 use std::{fmt};
-use crate::codegen::{ProgramAsm, gen_program};
+use crate::codegen::{AsmProgram, gen_program};
 use crate::lexer::{Token, Tokenizer};
 use crate::parser::{Parser, Program, pretty_print};
 use crate::poise::{PoiseProg, gen_poise};
@@ -68,12 +68,12 @@ fn run_poiser(program: Program) -> PoiseProg {
     gen_poise(program)
 }
 
-fn run_codegen(program: Program) -> ProgramAsm {
+fn run_codegen(program: PoiseProg) -> AsmProgram {
     gen_program(program)
 }
 
-fn run_emitter(asm_program: ProgramAsm, output_file: &PathBuf) -> Result<(), Box<dyn Error>> {
-    fs::write(&output_file, emit_program(asm_program))?;
+fn run_emitter(asm_program: AsmProgram, output_file: &PathBuf) -> Result<(), Box<dyn Error>> {
+    fs::write(&output_file, emit_program(asm_program)?)?;
     Ok(())
 }
 
@@ -118,14 +118,14 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<(), Box<d
         std::process::exit(0);
     }
 
-    //let asm = run_codegen(parsed);
-    //if args.codegen {
-    //    println!("{:#?}", asm);
-    //    std::process::exit(0);
-    //}
+    let asm = run_codegen(poise);
+    if args.codegen {
+        println!("{:#?}", asm);
+        std::process::exit(0);
+    }
     
-    //let mut output_file = input_file.clone();
-    //output_file.set_extension("");
-    //run_emitter(asm, &output_file)?;
+    let mut output_file = input_file.clone();
+    output_file.set_extension("");
+    run_emitter(asm, &output_file)?;
     Ok(())
 }

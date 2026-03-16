@@ -11,8 +11,8 @@ pub enum LexerError {
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            LexerError::IntegerOverflow(s) => write!(f, "Lexer Error: int overflow! \nLine: {}, Col: {}", s.line_number, s.start_idx),
-            LexerError::InvalidCharacter(c, s) => write!(f, "Lexer Error: invalid character! {}\nLine: {}, Col: {}", c, s.line_number, s.start_idx),
+            LexerError::IntegerOverflow(s) => write!(f, "Lexer Error: int overflow! \nLine: {}, Col: {}", s.line_number, s.col),
+            LexerError::InvalidCharacter(c, s) => write!(f, "Lexer Error: invalid character! {}\nLine: {}, Col: {}", c, s.line_number, s.col),
         }
     }
 }
@@ -22,8 +22,7 @@ impl std::error::Error for LexerError {}
 #[derive(Debug, Copy, Clone)]
 pub struct Span {
     pub line_number: usize,
-    pub start_idx: usize,
-    pub end_idx: usize,
+    pub col: usize,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -52,6 +51,7 @@ pub struct Tokenizer {
     chars: Peekable<IntoIter<char>>,
     start: usize,
     current: usize,
+    col: usize,
     len: usize,
     line: usize
 }
@@ -62,6 +62,7 @@ impl Tokenizer {
             chars: source.chars().collect::<Vec<char>>().into_iter().peekable(),
             start: 0,
             current: 0,
+            col: 0,
             len: source.len(),
             line: 1,
         }
@@ -76,15 +77,14 @@ impl Tokenizer {
     fn skip_whitespace(&mut self) {
         while let Some(&c) = self.chars.peek() {
             match c {
-                '\n' => { self.line += 1; self.chars.next(); self.current += 1},
+                '\n' => { self.line += 1; self.chars.next(); self.current += 1; self.col = 0},
                 ' ' | '\r' | '\t' => {self.chars.next(); self.current += 1},
                 _ => break,
             }
         }
     }
 
-    fn at_end(&self) -> bool {
-        self.current >= self.len 
+    fn at_end(&self) -> bool { self.current >= self.len 
     }
 
     fn next_token(&mut self) -> Result<Option<Token>, LexerError> {
@@ -169,8 +169,7 @@ impl Tokenizer {
     fn make_span(&mut self) -> Span {
         Span { 
             line_number: self.line,
-            start_idx: self.start,
-            end_idx: self.current,
+            col: self.current,
         }
     }
 

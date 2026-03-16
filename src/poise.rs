@@ -2,13 +2,13 @@ use crate::parser;
 
 #[derive(Debug)]
 pub struct PoiseProg {
-    function: PoiseFunc,
+    pub function: PoiseFunc,
 }
 
 #[derive(Debug)]
 pub struct PoiseFunc {
-    identifier: String,
-    body: Vec<PoiseInstruction>
+    pub identifier: String,
+    pub body: Vec<PoiseInstruction>
 }
 
 #[derive(Debug)]
