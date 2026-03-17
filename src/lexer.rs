@@ -39,6 +39,14 @@ pub enum TokenType {
     FwdSlash,
     Percent,
     Minus,
+    DoubleMinus,
+    Ampersand,
+    Pipe,
+    Caret,
+    LeftAngled,
+    DualLeftAngled,
+    RightAngled,
+    DualRightAngled,
     Constant(i32),
     Int,
     Void,
@@ -91,6 +99,16 @@ impl Tokenizer {
     fn at_end(&self) -> bool { self.current >= self.len 
     }
 
+    fn is_double_char(&mut self, nextchar: char, no: TokenType, yes: TokenType) -> TokenType {
+        if self.peek() != nextchar {
+            no
+        } else {
+            self.advance();
+            yes
+        }
+    }
+
+
     fn next_token(&mut self) -> Result<Option<Token>, LexerError> {
         self.skip_whitespace();
         self.start = self.current;
@@ -108,16 +126,15 @@ impl Tokenizer {
             ';' => TokenType::Semicolon,
             '~' => TokenType::Tilde,
             '+' => TokenType::Plus,
+            '-' => self.is_double_char('-', TokenType::Minus, TokenType::DoubleMinus),
             '*' => TokenType::Asterisk,
             '/' => TokenType::FwdSlash,
             '%' => TokenType::Percent,
-            '-' => {
-                if self.peek() != '-' {
-                    TokenType::Minus
-                } else {
-                    return Err(LexerError::InvalidCharacter(self.peek(), self.make_span()))
-                }
-            }
+            '&' => TokenType::Ampersand,
+            '|' => TokenType::Pipe,
+            '^' => TokenType::Caret,
+            '<' => self.is_double_char('<', TokenType::LeftAngled, TokenType::DualLeftAngled),
+            '>' => self.is_double_char('>', TokenType::RightAngled, TokenType::DualRightAngled),
             other => {
                 if other.is_digit(10) {
                     self.scan_constant(other)?

@@ -1,4 +1,4 @@
-use crate::codegen::{AsmFunction, AsmInstruction, AsmProgram, Operand, Register, UnaryOp};
+use crate::codegen::*;
 use std::fmt;
 
 #[derive(Debug)]
@@ -43,18 +43,36 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String) -> Result<
             let dst = emit_operand(dst)?;
             output.push_str(&format!("\tmovl\t{src},\t{dst}\n"));
         },
-        AsmInstruction::Ret => {
-            output.push_str("\tmovq\t%rbp,\t%rsp\n");
-            output.push_str("\tpopq\t%rbp\n");
-            output.push_str("\tret\n");
+        AsmInstruction::Movb(src, dst) => {
+            let src = emit_operand(src)?;
+            let dst = emit_operand(dst)?;
+            output.push_str(&format!("\tmovb\t{src},\t{dst}\n"));
         },
         AsmInstruction::Unary(unary_op, operand) => {
             let dst = emit_operand(operand)?;
             let op = emit_unary_op(unary_op);
             output.push_str(&format!("\t{op}\t{dst}\n"));
         },
+        AsmInstruction::Binary(binary_op, operand1, operand2) => {
+            let src = emit_operand(operand1)?;
+            let dst = emit_operand(operand2)?;
+            let op = emit_binary_op(binary_op);
+            output.push_str(&format!("\t{op}\t{src},\t{dst}\n"));
+        },
+        AsmInstruction::Idiv(operand) => {
+            let op = emit_operand(operand)?;
+            output.push_str(&format!("\tidivl\t{op}\n"));
+        },
         AsmInstruction::AllocateStack(int) => {
             output.push_str(&format!("\tsubq\t${int},\t%rsp\n"));
+        },
+        AsmInstruction::Cdq => {
+            output.push_str("\tcdq\n");
+        },
+        AsmInstruction::Ret => {
+            output.push_str("\tmovq\t%rbp,\t%rsp\n");
+            output.push_str("\tpopq\t%rbp\n");
+            output.push_str("\tret\n");
         },
     }
     Ok(())
@@ -66,7 +84,11 @@ fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
         Operand::Reg(reg) => {
             match reg {
                 Register::AX => Ok(String::from("%eax")),
+                Register::CX => Ok(String::from("%cl")),
+                Register::DX => Ok(String::from("%edx")),
                 Register::R10 => Ok(String::from("%r10d")),
+                Register::R10b => Ok(String::from("%r10b")),
+                Register::R11 => Ok(String::from("%r11d")),
             }
         },
         Operand::Stack(int) => Ok(format!("{int}(%rbp)")),
@@ -78,5 +100,18 @@ fn emit_unary_op(unary_op: UnaryOp) -> String {
     match unary_op {
         UnaryOp::Neg => String::from("negl"),
         UnaryOp::Not => String::from("notl"),
+    }
+}
+
+fn emit_binary_op(binary_op: BinaryOp) -> String {
+    match binary_op {
+        BinaryOp::Add => String::from("addl"),
+        BinaryOp::Sub => String::from("subl"),
+        BinaryOp::Mult => String::from("imull"),
+        BinaryOp::Sal => String::from("sall"),
+        BinaryOp::Sar => String::from("sarl"),
+        BinaryOp::BitAnd => String::from("andl"),
+        BinaryOp::BitOr => String::from("orl"),
+        BinaryOp::BitXor => String::from("xorl"),
     }
 }

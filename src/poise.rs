@@ -15,6 +15,7 @@ pub struct PoiseFunc {
 pub enum PoiseInstruction {
     Return(PoiseVal),
     Unary{op: PoiseUnaryOp, src: PoiseVal, dst: PoiseVal},
+    Binary{op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseVal}
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,20 @@ pub enum PoiseVal {
 pub enum PoiseUnaryOp {
     Complement,
     Negate,
+}
+
+#[derive(Debug)]
+pub enum PoiseBinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    LeftShift,
+    RightShift,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
 }
 
 struct PoiseCount {
@@ -78,6 +93,25 @@ fn emit_expression(
                 parser::UnaryOp::Complement => PoiseUnaryOp::Complement,
             };
             instructions.push(PoiseInstruction::Unary { op: unary_op, src, dst: dst.clone() });
+            dst
+        },
+        parser::Expression::Binary(op, exp1, exp2) => {
+            let binop = match op {
+                parser::BinaryOp::Add => PoiseBinaryOp::Add,
+                parser::BinaryOp::Subtract => PoiseBinaryOp::Subtract,
+                parser::BinaryOp::Multiply => PoiseBinaryOp::Multiply,
+                parser::BinaryOp::Divide => PoiseBinaryOp::Divide,
+                parser::BinaryOp::Remainder => PoiseBinaryOp::Remainder,
+                parser::BinaryOp::LeftShift => PoiseBinaryOp::LeftShift,
+                parser::BinaryOp::RightShift => PoiseBinaryOp::RightShift,
+                parser::BinaryOp::BitwiseAnd => PoiseBinaryOp::BitwiseAnd,
+                parser::BinaryOp::BitwiseOr => PoiseBinaryOp::BitwiseOr,
+                parser::BinaryOp::BitwiseXor => PoiseBinaryOp::BitwiseXor,
+            };
+            let v1 = emit_expression(*exp1, instructions, count);
+            let v2 = emit_expression(*exp2, instructions, count);
+            let dst = count.newtemp();
+            instructions.push(PoiseInstruction::Binary {op: binop, src1: v1, src2: v2, dst: dst.clone() });
             dst
         }
     }
