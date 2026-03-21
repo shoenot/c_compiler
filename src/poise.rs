@@ -87,15 +87,17 @@ fn gen_poisefunc(func: parser::Function, count: &mut TmpCount) -> PoiseFunc {
     PoiseFunc{ identifier: name, body: instructions }
 }
 
-fn gen_instructions(statement: parser::Statement, count: &mut TmpCount) -> Vec<PoiseInstruction> {
-    let mut instructions = Vec::new();
-    match statement {
-        parser::Statement::Return(expression) => {
-            let val = emit_expression(expression, &mut instructions, count);
-            instructions.push(PoiseInstruction::Return(val));
-        }
-    }
-    instructions
+fn gen_instructions(blockitem: Vec<parser::BlockItem>, count: &mut TmpCount) -> Vec<PoiseInstruction> {
+    todo!();
+    // let mut instructions = Vec::new();
+    // match blockitem {
+    //     parser::BlockItem::Return(expression) => {
+    //         let val = emit_expression(expression, &mut instructions, count);
+    //         instructions.push(PoiseInstruction::Return(val));
+    //     }
+    //     _ => todo!(),
+    // }
+    // instructions
 }
 
 // Constructs IR instructions and returns the destination
@@ -107,6 +109,7 @@ fn emit_expression(
         parser::Expression::Constant(val) => PoiseVal::Constant(val),
         parser::Expression::Unary(op, inner) => emit_un_exp(op, *inner, instructions, count),
         parser::Expression::Binary(op, exp1, exp2) => emit_bin_exp(op, *exp1, *exp2, instructions, count),
+        _ => todo!(),
     }
 }
 

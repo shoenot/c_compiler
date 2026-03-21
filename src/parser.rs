@@ -35,19 +35,35 @@ pub struct Program {
 #[derive(Debug)]
 pub struct Function {
     pub identifier: String,
-    pub body: Statement,
+    pub body: Vec<BlockItem>,
+}
+
+#[derive(Debug)]
+pub enum BlockItem {
+    S(Statement),
+    D(Declaration),
+}
+
+#[derive(Debug)]
+pub struct Declaration {
+    pub identifier: String,
+    pub init: Option<Expression>,
 }
 
 #[derive(Debug)]
 pub enum Statement {
-    Return(Expression)
+    Return(Expression),
+    Expression(Expression),
+    Null,
 }
 
 #[derive(Debug)]
 pub enum Expression {
     Constant(i32),
+    Var(String),
+    Assignment(Box<Expression>, Box<Expression>),
     Unary(UnaryOp, Box<Expression>),
-    Binary(BinaryOp, Box<Expression>, Box<Expression>)
+    Binary(BinaryOp, Box<Expression>, Box<Expression>),
 }
 
 #[derive(Debug)]
@@ -77,6 +93,7 @@ pub enum BinaryOp {
     LessOrEqual,
     GreaterThan,
     GreaterOrEqual,
+    Set,
 }
 
 #[derive(Debug)]
@@ -150,30 +167,70 @@ impl Parser {
         self.expect(TokenType::Void)?;
         self.expect(TokenType::CloseParen)?;
         self.expect(TokenType::OpenBrace)?;
-        let body = self.parse_statement()?;
-        self.expect(TokenType::Semicolon)?;
+        
+        let mut body = Vec::new();
+        while self.peek()?.token_type != TokenType::CloseBrace {
+            body.push(self.parse_blockitem()?);
+        }
+
         self.expect(TokenType::CloseBrace)?;
         Ok(Function {
             identifier, body
         })
     }
 
+    fn parse_blockitem(&mut self) -> Result<BlockItem, ParseError> {
+        let item = match self.peek()?.token_type {
+            TokenType::Int => BlockItem::D(self.parse_declaration()?),
+            TokenType::Return => BlockItem::S(self.parse_statement()?),
+            _ => BlockItem::S(self.parse_statement()?),
+        };
+        Ok(item)
+    }
+
+    fn parse_declaration(&mut self) -> Result<Declaration, ParseError> {
+        self.expect(TokenType::Int)?;
+        let identifier = self.expect_ident()?;
+        let mut init = None;
+        if self.peek()?.token_type != TokenType::Semicolon {
+            self.expect(TokenType::Equal)?;
+            init = Some(self.parse_expression(0)?);
+        }
+        self.expect(TokenType::Semicolon)?;
+        Ok(Declaration{identifier, init})
+    }
+    
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
-        self.expect(TokenType::Return)?;
-        let expression = self.parse_expression(0)?;
-        Ok(Statement::Return(expression))
+        let statement = match self.peek()?.token_type {
+            TokenType::Semicolon => Statement::Null,
+            TokenType::Return => {
+                self.advance()?;
+                Statement::Return(self.parse_expression(0)?)
+            },
+            _ => Statement::Expression(self.parse_expression(0)?),
+        };
+        self.expect(TokenType::Semicolon)?;
+        Ok(statement)
     }
 
     fn parse_expression(&mut self, min_prec: i32) -> Result<Expression, ParseError> {
         let mut left = self.parse_factor()?;
+        eprintln!("got here");
+        eprintln!("{:#?}", left);
         loop {
             let Some(op) = self.peek_binop()? else { break };
+            eprintln!("{:#?}", op);
             if self.precedence(&op) < min_prec { break } 
-            let prec = self.precedence(&op);
             self.advance()?;
-            let right = self.parse_expression(prec + 1)?;
-            left = Expression::Binary(op, Box::new(left), Box::new(right));
+            let prec = self.precedence(&op);
+            if op == BinaryOp::Set {
+                let right = self.parse_expression(prec)?;
+                left = Expression::Assignment(Box::new(left), Box::new(right));
+            } else {
+                let right = self.parse_expression(prec + 1)?;
+                left = Expression::Binary(op, Box::new(left), Box::new(right));
             }
+        }
         Ok(left)
     }
 
@@ -189,7 +246,11 @@ impl Parser {
             TokenType::Exclamation => self.parse_unop(UnaryOp::Not),
             TokenType::Tilde => self.parse_unop(UnaryOp::Complement),
             TokenType::Minus => self.parse_unop(UnaryOp::Negate),
-            _ => Err(ParseError::ExpectedExpression(self.current_span))
+            TokenType::Identifier(name) => Ok(Expression::Var(name)),
+            _ => { 
+                eprintln!("{:#?}", token);
+                Err(ParseError::ExpectedExpression(self.current_span))
+            }
         }
     }
 
@@ -218,7 +279,8 @@ impl Parser {
             TokenType::LessOrEqual => Ok(Some(BinaryOp::LessOrEqual)),
             TokenType::GreaterThan => Ok(Some(BinaryOp::GreaterThan)),
             TokenType::GreaterOrEqual => Ok(Some(BinaryOp::GreaterOrEqual)),
-            TokenType::DoubleMinus | TokenType::Equal => {
+            TokenType::Equal => Ok(Some(BinaryOp::Set)),
+            TokenType::DoubleMinus => {
                 Err(ParseError::Unimplemented(self.current_span))
             }
             _ => Ok(None),
@@ -245,6 +307,7 @@ impl Parser {
             BinaryOp::BitwiseOr      => 24,
             BinaryOp::LogicalAnd     => 10,
             BinaryOp::LogicalOr      => 5,
+            BinaryOp::Set            => 1,
         }
     }
 }
