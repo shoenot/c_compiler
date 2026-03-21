@@ -4,6 +4,7 @@ mod parser;
 mod codegen;
 mod emit;
 mod poise;
+mod semanal;
 use clap::Parser;
 use std::{path::PathBuf, process};
 use crate::driver::*;
@@ -17,6 +18,8 @@ struct Args {
     lex: bool,
     #[arg(long)]
     parse: bool,
+    #[arg(long)]
+    validate: bool,
     #[arg(long)]
     tacky: bool,
     #[arg(long)]

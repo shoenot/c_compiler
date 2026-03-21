@@ -1,4 +1,4 @@
-use crate::parser;
+use crate::parser::{self, BlockItem};
 
 #[derive(Debug)]
 pub struct PoiseProg {
@@ -82,22 +82,36 @@ pub fn gen_poise(tree: parser::Program) -> PoiseProg {
 }
 
 fn gen_poisefunc(func: parser::Function, count: &mut TmpCount) -> PoiseFunc {
+    let mut instructions = Vec::new();
     let name = func.identifier;
-    let instructions = gen_instructions(func.body, count);
+    for blockitem in func.body {
+        match blockitem {
+            parser::BlockItem::S(s) => gen_inst_statement(s, &mut instructions, count),
+            parser::BlockItem::D(d) => gen_inst_declaration(d, &mut instructions, count),
+        }
+    }
+    instructions.push(PoiseInstruction::Return(PoiseVal::Constant(0)));
     PoiseFunc{ identifier: name, body: instructions }
 }
 
-fn gen_instructions(blockitem: Vec<parser::BlockItem>, count: &mut TmpCount) -> Vec<PoiseInstruction> {
-    todo!();
-    // let mut instructions = Vec::new();
-    // match blockitem {
-    //     parser::BlockItem::Return(expression) => {
-    //         let val = emit_expression(expression, &mut instructions, count);
-    //         instructions.push(PoiseInstruction::Return(val));
-    //     }
-    //     _ => todo!(),
-    // }
-    // instructions
+fn gen_inst_declaration(declaration: parser::Declaration, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount) {
+    if let Some(exp) = declaration.init {
+        let val = emit_expression(exp, instructions, count);
+        instructions.push(PoiseInstruction::Copy { src: val, dst: PoiseVal::Variable(declaration.identifier) });
+    }
+}
+
+fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount) {
+    match statement {
+        parser::Statement::Return(expression) => {
+            let val = emit_expression(expression, instructions, count);
+            instructions.push(PoiseInstruction::Return(val));
+        }
+        parser::Statement::Expression(expression) => {
+            emit_expression(expression, instructions, count);
+        }
+        parser::Statement::Null => return, 
+    }
 }
 
 // Constructs IR instructions and returns the destination
@@ -109,7 +123,13 @@ fn emit_expression(
         parser::Expression::Constant(val) => PoiseVal::Constant(val),
         parser::Expression::Unary(op, inner) => emit_un_exp(op, *inner, instructions, count),
         parser::Expression::Binary(op, exp1, exp2) => emit_bin_exp(op, *exp1, *exp2, instructions, count),
-        _ => todo!(),
+        parser::Expression::Var(name) => PoiseVal::Variable(name),
+        parser::Expression::Assignment(lhs, rhs) => {
+            let result = emit_expression(*rhs, instructions, count);
+            let dest = emit_expression(*lhs, instructions, count);
+            instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
+            dest
+        },
     }
 }
 

@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use std::error::Error;
 use std::fs;
 use std::{fmt};
+use std::collections::HashMap;
 use crate::codegen::{AsmProgram, gen_program};
 use crate::lexer::{Token, Tokenizer};
 use crate::parser::{Parser, Program, pretty_print};
+use crate::semanal::semantic_analysis;
 use crate::poise::{PoiseProg, gen_poise};
 use crate::emit::emit_program;
 
@@ -64,6 +66,11 @@ fn run_parser(tokens: Vec<Token>) -> Result<Program, Box<dyn Error>> {
     Ok(program)
 }
 
+fn run_semanal(program: &mut Program) -> Result<HashMap<String, String>, Box<dyn Error>> {
+    let var_map = semantic_analysis(program)?;
+    Ok(var_map)
+}
+
 fn run_poise(program: Program) -> PoiseProg {
     gen_poise(program)
 }
@@ -71,6 +78,7 @@ fn run_poise(program: Program) -> PoiseProg {
 fn run_codegen(program: PoiseProg) -> AsmProgram {
     gen_program(program)
 }
+
 
 fn run_emitter(asm_program: AsmProgram, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
     fs::write(&output_file, emit_program(asm_program)?)?;
@@ -86,9 +94,16 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
         std::process::exit(0);
     } 
 
-    let parsed = run_parser(lexed)?;
+    let mut parsed = run_parser(lexed)?;
     if args.parse {
         pretty_print(parsed);
+        std::process::exit(0);
+    }
+
+    let mut var_map = run_semanal(&mut parsed)?;
+    if args.validate {
+        println!("{:#?}", parsed);
+        println!("{:#?}", var_map);
         std::process::exit(0);
     }
 
