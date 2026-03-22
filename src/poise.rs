@@ -111,6 +111,24 @@ fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<Poise
             emit_expression(expression, instructions, count);
         }
         parser::Statement::Null => return,
+        parser::Statement::If(c, y, n) => {
+            let cond = count.new_var();
+            let eval = emit_expression(c, instructions, count);
+            let no_label = count.new_label_string();
+            instructions.push(PoiseInstruction::Copy { src: eval, dst: cond.clone() });
+            instructions.push(PoiseInstruction::JumpIfZero { condition: cond, identifier: no_label.clone() });
+            gen_inst_statement(*y, instructions, count);
+            if let Some(n) = n {
+                let yes_label = count.new_label_string();
+                instructions.push(PoiseInstruction::Jump(yes_label.clone()));
+                instructions.push(PoiseInstruction::Label(no_label));
+                gen_inst_statement(*n, instructions, count);
+                instructions.push(PoiseInstruction::Label(yes_label));
+            } else {
+                instructions.push(PoiseInstruction::Label(no_label));
+            }
+        }
+        _ => todo!(),
     }
 }
 
@@ -130,6 +148,27 @@ fn emit_expression(
             instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
             dest
         },
+        parser::Expression::Conditional(c, y, n) => {
+            let cond = count.new_var();
+            let eval = emit_expression(*c, instructions, count);
+            let no_label = count.new_label_string();
+            let yes_label = count.new_label_string();
+            let dest = count.new_var();
+
+            instructions.push(PoiseInstruction::Copy { src: eval, dst: cond.clone() });
+
+            instructions.push(PoiseInstruction::JumpIfZero { condition: cond, identifier: no_label.clone() });
+            let result = emit_expression(*y, instructions, count);
+            instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
+            instructions.push(PoiseInstruction::Jump(yes_label.clone()));
+            instructions.push(PoiseInstruction::Label(no_label));
+
+            let result = emit_expression(*n, instructions, count);
+            instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
+            instructions.push(PoiseInstruction::Label(yes_label));
+            dest
+        },
+        _ => todo!(),
     }
 }
 

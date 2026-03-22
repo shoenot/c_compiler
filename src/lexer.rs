@@ -1,6 +1,7 @@
 use std::{
     iter::Peekable, vec::IntoIter, fmt,
 };
+use crate::tokens::TokenType;
 
 #[derive(Debug)]
 pub enum LexerError {
@@ -23,53 +24,6 @@ impl std::error::Error for LexerError {}
 pub struct Span {
     pub line_number: usize,
     pub col: usize,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum TokenType {
-    Identifier(String),
-    OpenParen,
-    CloseParen,
-    OpenBrace,
-    CloseBrace,
-    Semicolon,
-    Tilde,
-    Plus,
-    DoublePlus,
-    Asterisk,
-    FwdSlash,
-    Percent,
-    Minus,
-    DoubleMinus,
-    Equal,
-    DoubleEqual,
-    NotEqual,
-    Ampersand,
-    DoubleAmpersand,
-    Pipe,
-    DoublePipe,
-    Caret,
-    Exclamation,
-    LessThan,
-    DoubleLeftAngled,
-    GreaterThan,
-    DoubleRightAngled,
-    LessOrEqual,
-    GreaterOrEqual,
-    Constant(i32),
-    PlusEqual,
-    MinusEqual,
-    AsteriskEqual,
-    FwdSlashEqual,
-    PercentEqual,
-    AmpersandEqual,
-    PipeEqual,
-    CaretEqual,
-    DLAngledEqual,
-    DRAngledEqual,
-    Int,
-    Void,
-    Return,
 }
 
 #[derive(Debug)]
@@ -157,6 +111,8 @@ impl Tokenizer {
             '}' => TokenType::CloseBrace,
             ';' => TokenType::Semicolon,
             '~' => TokenType::Tilde,
+            '?' => TokenType::QuestionMark,
+            ':' => TokenType::Colon,
             '*' => self.is_double_char('=', TokenType::Asterisk, TokenType::AsteriskEqual),
             '/' => self.is_double_char('=', TokenType::FwdSlash, TokenType::FwdSlashEqual),
             '%' => self.is_double_char('=', TokenType::Percent, TokenType::PercentEqual),
@@ -216,6 +172,8 @@ impl Tokenizer {
             "return" => TokenType::Return,
             "int" => TokenType::Int,
             "void" => TokenType::Void,
+            "if" => TokenType::If,
+            "else" => TokenType::Else,
             _ => return None,
         };
 

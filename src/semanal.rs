@@ -54,6 +54,13 @@ fn resolve_statement(statement: &mut Statement,
     match statement {
         Statement::Return(e) => resolve_expression(e, var_map, counter)?,
         Statement::Expression(e) => resolve_expression(e, var_map, counter)?,
+        Statement::If(c,y,mn) => {
+            resolve_expression(c, var_map, counter)?;
+            resolve_statement(y, var_map, counter)?;
+            if let Some(n) = mn {
+                resolve_statement(n, var_map, counter)?;
+            }
+        },
         Statement::Null => return Ok(()),
     }
     Ok(())
@@ -111,7 +118,12 @@ fn resolve_expression(expression: &mut Expression,
         Expression::Binary(_, exp1, exp2) => {
             resolve_expression(exp1.as_mut(), var_map, counter)?;
             resolve_expression(exp2.as_mut(), var_map, counter)?;
-        }
+        },
+        Expression::Conditional(exp1, exp2, exp3) => {
+            resolve_expression(exp1.as_mut(), var_map, counter)?;
+            resolve_expression(exp2.as_mut(), var_map, counter)?;
+            resolve_expression(exp3.as_mut(), var_map, counter)?;
+        },
         Expression::Constant(_) => return Ok(()),
     }
     Ok(())

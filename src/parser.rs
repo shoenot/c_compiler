@@ -3,6 +3,7 @@ use std::vec::IntoIter;
 use std::fmt;
 
 use crate::lexer::*;
+use crate::tokens::TokenType;
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -54,6 +55,7 @@ pub struct Declaration {
 pub enum Statement {
     Return(Expression),
     Expression(Expression),
+    If(Expression, Box<Statement>, Option<Box<Statement>>), // Else statements not mandatory. 
     Null,
 }
 
@@ -63,8 +65,8 @@ pub enum Expression {
     Var(String),
     Assignment(Box<Expression>, Box<Expression>),
     Unary(UnaryOp, Box<Expression>),
-    Postfix
     Binary(BinaryOp, Box<Expression>, Box<Expression>),
+    Conditional(Box<Expression>, Box<Expression>, Box<Expression>),
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +98,7 @@ pub enum BinaryOp {
     GreaterOrEqual,
     Set,
     OpSet(Box<BinaryOp>),
+    Ternary,
 }
 
 #[derive(Debug)]
@@ -204,14 +207,37 @@ impl Parser {
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         let statement = match self.peek()?.token_type {
-            TokenType::Semicolon => Statement::Null,
+            TokenType::Semicolon => { 
+                let ret = Statement::Null;
+                self.expect(TokenType::Semicolon)?;
+                ret
+            },
             TokenType::Return => {
                 self.advance()?;
-                Statement::Return(self.parse_expression(0)?)
+                let ret = Statement::Return(self.parse_expression(0)?);
+                self.expect(TokenType::Semicolon)?;
+                ret 
             },
-            _ => Statement::Expression(self.parse_expression(0)?),
+            TokenType::If => {
+                self.advance()?;
+                self.expect(TokenType::OpenParen)?;
+                let cond = self.parse_expression(0)?;
+                self.expect(TokenType::CloseParen)?;
+                let yes = self.parse_statement()?;
+                if self.peek()?.token_type == TokenType::Else { 
+                    self.advance()?;
+                    let no = self.parse_statement()?;
+                    Statement::If(cond, Box::new(yes), Some(Box::new(no)))
+                } else {
+                    Statement::If(cond, Box::new(yes), None)
+                }
+            },
+            _ => {
+                let ret = Statement::Expression(self.parse_expression(0)?);
+                self.expect(TokenType::Semicolon)?;
+                ret
+            },
         };
-        self.expect(TokenType::Semicolon)?;
         Ok(statement)
     }
 
@@ -232,6 +258,11 @@ impl Parser {
                     let binary = Expression::Binary(*op, Box::new(left.clone()), Box::new(right));
                     left = Expression::Assignment(Box::new(left), Box::new(binary));
                 }
+                BinaryOp::Ternary => {
+                    let middle = self.parse_conditional_middle()?;
+                    let right = self.parse_expression(prec)?;
+                    left = Expression::Conditional(Box::new(left), Box::new(middle), Box::new(right));
+                },
                 _ => {
                     let right = self.parse_expression(prec + 1)?;
                     left = Expression::Binary(op, Box::new(left), Box::new(right));
@@ -239,6 +270,12 @@ impl Parser {
             }
         }
         Ok(left)
+    }
+
+    fn parse_conditional_middle(&mut self) -> Result<Expression, ParseError> {
+        let exp = self.parse_expression(0)?;
+        self.expect(TokenType::Colon)?;
+        Ok(exp)
     }
 
     fn parse_factor(&mut self) -> Result<Expression, ParseError> {
@@ -297,6 +334,7 @@ impl Parser {
             TokenType::CaretEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::BitwiseXor)))),
             TokenType::DLAngledEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::LeftShift)))),
             TokenType::DRAngledEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::RightShift)))),
+            TokenType::QuestionMark => Ok(Some(BinaryOp::Ternary)),
             TokenType::DoubleMinus | TokenType::DoublePlus => {
                 Err(ParseError::Unimplemented(self.current_span))
             }
@@ -324,6 +362,7 @@ impl Parser {
             BinaryOp::BitwiseOr      => 24,
             BinaryOp::LogicalAnd     => 10,
             BinaryOp::LogicalOr      => 5,
+            BinaryOp::Ternary        => 3,
             BinaryOp::Set            => 1,
             BinaryOp::OpSet(_)       => 1,
         }

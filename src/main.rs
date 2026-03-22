@@ -5,6 +5,7 @@ mod codegen;
 mod emit;
 mod poise;
 mod semanal;
+mod tokens;
 use clap::Parser;
 use std::{path::PathBuf, process};
 use crate::driver::*;
