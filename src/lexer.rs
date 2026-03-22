@@ -35,6 +35,7 @@ pub enum TokenType {
     Semicolon,
     Tilde,
     Plus,
+    DoublePlus,
     Asterisk,
     FwdSlash,
     Percent,
@@ -56,6 +57,16 @@ pub enum TokenType {
     LessOrEqual,
     GreaterOrEqual,
     Constant(i32),
+    PlusEqual,
+    MinusEqual,
+    AsteriskEqual,
+    FwdSlashEqual,
+    PercentEqual,
+    AmpersandEqual,
+    PipeEqual,
+    CaretEqual,
+    DLAngledEqual,
+    DRAngledEqual,
     Int,
     Void,
     Return,
@@ -103,7 +114,7 @@ impl Tokenizer {
         }
     }
 
-    fn at_end(&self) -> bool { self.current >= self.len 
+    fn at_end(&self) -> bool { self.current >= self.len
     }
 
     fn is_double_char(&mut self, nextchar: char, no: TokenType, yes: TokenType) -> TokenType {
@@ -115,13 +126,28 @@ impl Tokenizer {
         }
     }
 
+    fn is_double_char_three(&mut self, not_double_char: TokenType,
+        firstchar: char, first: TokenType,
+        secondchar: char, second: TokenType) -> TokenType {
+
+        let next = self.peek();
+        if next == firstchar {
+            self.advance();
+            first
+        } else if next == secondchar {
+            self.advance();
+            second
+        } else {
+            not_double_char
+        }
+    }
 
     fn next_token(&mut self) -> Result<Option<Token>, LexerError> {
         self.skip_whitespace();
         if self.at_end() {
             return Ok(None);
         }
-        
+
         let c = self.advance();
 
         let token_type = match c {
@@ -131,30 +157,26 @@ impl Tokenizer {
             '}' => TokenType::CloseBrace,
             ';' => TokenType::Semicolon,
             '~' => TokenType::Tilde,
-            '+' => TokenType::Plus,
-            '*' => TokenType::Asterisk,
-            '/' => TokenType::FwdSlash,
-            '%' => TokenType::Percent,
-            '^' => TokenType::Caret,
-            '-' => self.is_double_char('-', TokenType::Minus, TokenType::DoubleMinus),
+            '*' => self.is_double_char('=', TokenType::Asterisk, TokenType::AsteriskEqual),
+            '/' => self.is_double_char('=', TokenType::FwdSlash, TokenType::FwdSlashEqual),
+            '%' => self.is_double_char('=', TokenType::Percent, TokenType::PercentEqual),
+            '^' => self.is_double_char('=', TokenType::Caret, TokenType::CaretEqual),
             '!' => self.is_double_char('=', TokenType::Exclamation, TokenType::NotEqual),
+            '&' => self.is_double_char_three(TokenType::Ampersand, '&', TokenType::DoubleAmpersand, '=', TokenType::AmpersandEqual),
+            '|' => self.is_double_char_three(TokenType::Pipe, '|', TokenType::DoublePipe, '=', TokenType::PipeEqual),
+            '-' => self.is_double_char_three(TokenType::Minus, '-', TokenType::DoubleMinus, '=', TokenType::MinusEqual),
+            '+' => self.is_double_char_three(TokenType::Plus, '+', TokenType::DoublePlus, '=', TokenType::PlusEqual),
+            '<' => match self.peek() {
+                '<' => { self.advance(); self.is_double_char('=', TokenType::DoubleLeftAngled, TokenType::DLAngledEqual) },
+                '=' => { self.advance(); TokenType::LessOrEqual },
+                _   => TokenType::LessThan,
+            },
+            '>' => match self.peek() {
+                '>' => { self.advance(); self.is_double_char('=', TokenType::DoubleRightAngled, TokenType::DRAngledEqual) },
+                '=' => { self.advance(); TokenType::GreaterOrEqual },
+                _   => TokenType::GreaterThan,
+            },
             '=' => self.is_double_char('=', TokenType::Equal, TokenType::DoubleEqual),
-            '&' => self.is_double_char('&', TokenType::Ampersand, TokenType::DoubleAmpersand),
-            '|' => self.is_double_char('|', TokenType::Pipe, TokenType::DoublePipe),
-            '<' => {
-                match self.peek()  {
-                    '<' => { self.advance(); TokenType::DoubleLeftAngled },
-                    '=' => { self.advance(); TokenType::LessOrEqual },
-                    _ => TokenType::LessThan,
-                }
-            }
-            '>' => {
-                match self.peek()  {
-                    '>' => { self.advance(); TokenType::DoubleRightAngled },
-                    '=' => { self.advance(); TokenType::GreaterOrEqual },
-                    _ => TokenType::GreaterThan,
-                }
-            }
             other => {
                 if other.is_digit(10) {
                     self.scan_constant(other)?
@@ -180,7 +202,7 @@ impl Tokenizer {
 
         while self.peek().is_ascii_digit() {
             number.push(self.advance());
-        } 
+        }
 
         if self.peek().is_ascii_alphabetic() {
             return Err(LexerError::InvalidCharacter(self.peek(), self.make_span()))
@@ -212,7 +234,7 @@ impl Tokenizer {
     }
 
     fn make_span(&mut self) -> Span {
-        Span { 
+        Span {
             line_number: self.line,
             col: self.current,
         }
@@ -226,5 +248,3 @@ impl Tokenizer {
         Ok(tokens)
     }
 }
-
-

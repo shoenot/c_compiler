@@ -124,6 +124,7 @@ fn emit_1b_operand(operand: Operand) -> Result<String, EmissionError> {
             match reg {
                 Register::AX => Ok(String::from("%al")),
                 Register::CX => Ok(String::from("%cl")),
+                Register::CL => Ok(String::from("%cl")),
                 Register::DX => Ok(String::from("%dl")),
                 Register::R10 => Ok(String::from("%r10b")),
                 Register::R11 => Ok(String::from("%r11b")),
@@ -141,6 +142,7 @@ fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
             match reg {
                 Register::AX => Ok(String::from("%eax")),
                 Register::CX => Ok(String::from("%ecx")),
+                Register::CL => Ok(String::from("%cl")), // for byte operations
                 Register::DX => Ok(String::from("%edx")),
                 Register::R10 => Ok(String::from("%r10d")),
                 Register::R11 => Ok(String::from("%r11d")),

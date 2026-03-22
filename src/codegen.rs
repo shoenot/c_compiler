@@ -59,6 +59,7 @@ pub enum Operand {
 pub enum Register {
     AX,
     CX,
+    CL,
     DX,
     R10,
     R11,
@@ -198,7 +199,7 @@ fn binary_handler(op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseV
                 _ => {
                     generated.push(AsmInstruction::Mov(s2, Operand::Reg(Register::R10)));
                     generated.push(AsmInstruction::Movb(Operand::Reg(Register::R10), Operand::Reg(Register::CX)));
-                    generated.push(AsmInstruction::Binary(gen_binary(op), Operand::Reg(Register::CX), d));
+                    generated.push(AsmInstruction::Binary(gen_binary(op), Operand::Reg(Register::CL), d));
                 },
             }
         }
@@ -219,7 +220,7 @@ fn assign_stack_slots(func: AsmFunction) -> AsmFunction {
         match instruction {
             AsmInstruction::Ret => new_instructions.push(AsmInstruction::Ret),
             AsmInstruction::Mov(src, dst)  => {
-                let src = resolve_operand(src, &mut map, &mut offset); 
+                let src = resolve_operand(src, &mut map, &mut offset);
                 let dst = resolve_operand(dst, &mut map, &mut offset);
                 match (&src, &dst) {
                     (Operand::Stack(_), Operand::Stack(_)) => {
@@ -230,7 +231,7 @@ fn assign_stack_slots(func: AsmFunction) -> AsmFunction {
                 }
             },
             AsmInstruction::Movb(src, dst) => {
-                let src = resolve_operand(src, &mut map, &mut offset); 
+                let src = resolve_operand(src, &mut map, &mut offset);
                 let dst = resolve_operand(dst, &mut map, &mut offset);
                 new_instructions.push(AsmInstruction::Movb(src, Operand::Reg(Register::R10)));
                 new_instructions.push(AsmInstruction::Movb(Operand::Reg(Register::R10), dst));

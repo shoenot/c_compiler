@@ -48,7 +48,7 @@ pub enum PoiseBinaryOp {
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
-    Equal, 
+    Equal,
     NotEqual,
     LessThan,
     GreaterThan,
@@ -72,7 +72,7 @@ impl TmpCount {
         let name = format!("lab.{}", self.label_counter);
         self.label_counter += 1;
         name
-    }   
+    }
 }
 
 pub fn gen_poise(tree: parser::Program) -> PoiseProg {
@@ -110,14 +110,14 @@ fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<Poise
         parser::Statement::Expression(expression) => {
             emit_expression(expression, instructions, count);
         }
-        parser::Statement::Null => return, 
+        parser::Statement::Null => return,
     }
 }
 
 // Constructs IR instructions and returns the destination
 fn emit_expression(
-    expr: parser::Expression, 
-    instructions: &mut Vec<PoiseInstruction>, 
+    expr: parser::Expression,
+    instructions: &mut Vec<PoiseInstruction>,
     count: &mut TmpCount) -> PoiseVal {
     match expr {
         parser::Expression::Constant(val) => PoiseVal::Constant(val),
@@ -133,8 +133,8 @@ fn emit_expression(
     }
 }
 
-fn emit_bin_exp(op: parser::BinaryOp, 
-    exp1: parser::Expression, 
+fn emit_bin_exp(op: parser::BinaryOp,
+    exp1: parser::Expression,
     exp2: parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
     count: &mut TmpCount) -> PoiseVal {
@@ -180,11 +180,11 @@ fn emit_un_exp(op: parser::UnaryOp,
             _ => todo!()
         };
         instructions.push(PoiseInstruction::Unary { op: unary_op, src, dst: dst.clone() });
-        dst 
+        dst
 }
 
-fn emit_short_circuit_exp(op: parser::BinaryOp, 
-    exp1: parser::Expression, 
+fn emit_short_circuit_exp(op: parser::BinaryOp,
+    exp1: parser::Expression,
     exp2: parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
     count: &mut TmpCount) -> PoiseVal {
@@ -192,7 +192,7 @@ fn emit_short_circuit_exp(op: parser::BinaryOp,
     let false_label = count.new_label_string();
     let true_label = count.new_label_string();
     let dst = count.new_var();
-    
+
     match op {
         parser::BinaryOp::LogicalAnd => {
             let v1 = emit_expression(exp1, instructions, count);
@@ -229,4 +229,3 @@ fn emit_short_circuit_exp(op: parser::BinaryOp,
         _ => panic!(),
     }
 }
-

@@ -36,7 +36,7 @@ impl Counter {
     }
 }
 
-fn resolve_program_vars(program: &mut Program, 
+fn resolve_program_vars(program: &mut Program,
     var_map: &mut HashMap<String, String>,
     counter: &mut Counter) -> Result<(), SemanticError> {
     for blockitem in &mut program.function.body {
@@ -48,7 +48,7 @@ fn resolve_program_vars(program: &mut Program,
     Ok(())
 }
 
-fn resolve_statement(statement: &mut Statement, 
+fn resolve_statement(statement: &mut Statement,
     var_map: &mut HashMap<String, String>,
     counter: &mut Counter) -> Result<(), SemanticError> {
     match statement {
@@ -59,7 +59,7 @@ fn resolve_statement(statement: &mut Statement,
     Ok(())
 }
 
-fn resolve_declaration(declaration: &mut Declaration, 
+fn resolve_declaration(declaration: &mut Declaration,
     var_map: &mut HashMap<String, String>,
     counter: &mut Counter) -> Result<(), SemanticError> {
 
@@ -100,7 +100,10 @@ fn resolve_expression(expression: &mut Expression,
                         return Err(SemanticError::UseBeforeDeclaration(x.to_string()));
                     }
                 },
-                _ => return Err(SemanticError::InvalidLValue),
+                _ => {
+                    eprintln!("Invalid L-value: {:?}", lhs);
+                    return Err(SemanticError::InvalidLValue);
+                }
             }
             resolve_expression(rhs.as_mut(), var_map, counter)?;
         },

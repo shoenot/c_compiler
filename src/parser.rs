@@ -57,23 +57,24 @@ pub enum Statement {
     Null,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     Constant(i32),
     Var(String),
     Assignment(Box<Expression>, Box<Expression>),
     Unary(UnaryOp, Box<Expression>),
+    Postfix
     Binary(BinaryOp, Box<Expression>, Box<Expression>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnaryOp {
     Complement,
     Negate,
     Not,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -94,6 +95,7 @@ pub enum BinaryOp {
     GreaterThan,
     GreaterOrEqual,
     Set,
+    OpSet(Box<BinaryOp>),
 }
 
 #[derive(Debug)]
@@ -113,7 +115,7 @@ impl Parser {
         }
     }
 
-    fn advance(& mut self) -> Result<Token, ParseError> {
+    fn advance(&mut self) -> Result<Token, ParseError> {
         match self.tokens.next() {
             None => Err(ParseError::UnexpectedEOF),
             Some(token) => {
@@ -167,7 +169,7 @@ impl Parser {
         self.expect(TokenType::Void)?;
         self.expect(TokenType::CloseParen)?;
         self.expect(TokenType::OpenBrace)?;
-        
+
         let mut body = Vec::new();
         while self.peek()?.token_type != TokenType::CloseBrace {
             body.push(self.parse_blockitem()?);
@@ -199,7 +201,7 @@ impl Parser {
         self.expect(TokenType::Semicolon)?;
         Ok(Declaration{identifier, init})
     }
-    
+
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         let statement = match self.peek()?.token_type {
             TokenType::Semicolon => Statement::Null,
@@ -215,20 +217,25 @@ impl Parser {
 
     fn parse_expression(&mut self, min_prec: i32) -> Result<Expression, ParseError> {
         let mut left = self.parse_factor()?;
-        eprintln!("got here");
-        eprintln!("{:#?}", left);
         loop {
             let Some(op) = self.peek_binop()? else { break };
-            eprintln!("{:#?}", op);
-            if self.precedence(&op) < min_prec { break } 
+            if self.precedence(&op) < min_prec { break }
             self.advance()?;
             let prec = self.precedence(&op);
-            if op == BinaryOp::Set {
-                let right = self.parse_expression(prec)?;
-                left = Expression::Assignment(Box::new(left), Box::new(right));
-            } else {
-                let right = self.parse_expression(prec + 1)?;
-                left = Expression::Binary(op, Box::new(left), Box::new(right));
+            match op {
+                BinaryOp::Set => {
+                    let right = self.parse_expression(prec)?;
+                    left = Expression::Assignment(Box::new(left), Box::new(right));
+                }
+                BinaryOp::OpSet(op) => {
+                    let right = self.parse_expression(prec)?;
+                    let binary = Expression::Binary(*op, Box::new(left.clone()), Box::new(right));
+                    left = Expression::Assignment(Box::new(left), Box::new(binary));
+                }
+                _ => {
+                    let right = self.parse_expression(prec + 1)?;
+                    left = Expression::Binary(op, Box::new(left), Box::new(right));
+                }
             }
         }
         Ok(left)
@@ -247,7 +254,7 @@ impl Parser {
             TokenType::Tilde => self.parse_unop(UnaryOp::Complement),
             TokenType::Minus => self.parse_unop(UnaryOp::Negate),
             TokenType::Identifier(name) => Ok(Expression::Var(name)),
-            _ => { 
+            _ => {
                 eprintln!("{:#?}", token);
                 Err(ParseError::ExpectedExpression(self.current_span))
             }
@@ -280,7 +287,17 @@ impl Parser {
             TokenType::GreaterThan => Ok(Some(BinaryOp::GreaterThan)),
             TokenType::GreaterOrEqual => Ok(Some(BinaryOp::GreaterOrEqual)),
             TokenType::Equal => Ok(Some(BinaryOp::Set)),
-            TokenType::DoubleMinus => {
+            TokenType::PlusEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::Add)))),
+            TokenType::MinusEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::Subtract)))),
+            TokenType::AsteriskEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::Multiply)))),
+            TokenType::FwdSlashEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::Divide)))),
+            TokenType::PercentEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::Remainder)))),
+            TokenType::AmpersandEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::BitwiseAnd)))),
+            TokenType::PipeEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::BitwiseOr)))),
+            TokenType::CaretEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::BitwiseXor)))),
+            TokenType::DLAngledEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::LeftShift)))),
+            TokenType::DRAngledEqual => Ok(Some(BinaryOp::OpSet(Box::new(BinaryOp::RightShift)))),
+            TokenType::DoubleMinus | TokenType::DoublePlus => {
                 Err(ParseError::Unimplemented(self.current_span))
             }
             _ => Ok(None),
@@ -308,6 +325,7 @@ impl Parser {
             BinaryOp::LogicalAnd     => 10,
             BinaryOp::LogicalOr      => 5,
             BinaryOp::Set            => 1,
+            BinaryOp::OpSet(_)       => 1,
         }
     }
 }
@@ -315,4 +333,3 @@ impl Parser {
 pub fn pretty_print(tree: Program) {
     println!("{:#?}", tree);
 }
-        
