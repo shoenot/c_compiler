@@ -2,8 +2,7 @@ use std::iter::Peekable;
 use std::vec::IntoIter;
 use std::fmt;
 
-use crate::lexer::*;
-use crate::tokens::TokenType;
+use crate::lexer::*; use crate::tokens::TokenType;
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -56,6 +55,8 @@ pub enum Statement {
     Return(Expression),
     Expression(Expression),
     If(Expression, Box<Statement>, Option<Box<Statement>>), // Else statements not mandatory. 
+    Label(String), 
+    Goto(String),
     Null,
 }
 
@@ -187,7 +188,6 @@ impl Parser {
     fn parse_blockitem(&mut self) -> Result<BlockItem, ParseError> {
         let item = match self.peek()?.token_type {
             TokenType::Int => BlockItem::D(self.parse_declaration()?),
-            TokenType::Return => BlockItem::S(self.parse_statement()?),
             _ => BlockItem::S(self.parse_statement()?),
         };
         Ok(item)
@@ -206,7 +206,7 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
-        let statement = match self.peek()?.token_type {
+        let statement = match self.peek()?.token_type.clone() {
             TokenType::Semicolon => { 
                 let ret = Statement::Null;
                 self.expect(TokenType::Semicolon)?;
@@ -232,6 +232,30 @@ impl Parser {
                     Statement::If(cond, Box::new(yes), None)
                 }
             },
+            TokenType::Identifier(name) => {
+                self.advance()?;
+                if self.peek()?.token_type == TokenType::Colon {
+                    let ret = Statement::Label(name);
+                    self.expect(TokenType::Colon)?;
+                    ret
+                } else {
+                    let expr = Expression::Var(name);
+                    let expr = self.parse_expression_cont(expr, 0)?;
+                    self.expect(TokenType::Semicolon)?;
+                    Statement::Expression(expr)
+                }
+            },
+            TokenType::Goto => {
+                self.advance()?;
+                let token = self.advance()?;
+                match token.token_type {
+                    TokenType::Identifier(name) => {
+                        self.expect(TokenType::Semicolon)?;
+                        Statement::Goto(name)
+                    },
+                    _ => return Err(ParseError::ExpectedIdentifier(self.current_span))
+                }
+            },
             _ => {
                 let ret = Statement::Expression(self.parse_expression(0)?);
                 self.expect(TokenType::Semicolon)?;
@@ -242,7 +266,11 @@ impl Parser {
     }
 
     fn parse_expression(&mut self, min_prec: i32) -> Result<Expression, ParseError> {
-        let mut left = self.parse_factor()?;
+        let left = self.parse_factor()?;
+        self.parse_expression_cont(left, min_prec)
+    }
+
+    fn parse_expression_cont(&mut self, mut left: Expression, min_prec: i32) -> Result<Expression, ParseError> {
         loop {
             let Some(op) = self.peek_binop()? else { break };
             if self.precedence(&op) < min_prec { break }
@@ -271,6 +299,7 @@ impl Parser {
         }
         Ok(left)
     }
+
 
     fn parse_conditional_middle(&mut self) -> Result<Expression, ParseError> {
         let exp = self.parse_expression(0)?;

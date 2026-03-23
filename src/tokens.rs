@@ -47,4 +47,5 @@ pub enum TokenType {
     Return,
     If,
     Else,
+    Goto,
 }

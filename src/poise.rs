@@ -127,7 +127,9 @@ fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<Poise
             } else {
                 instructions.push(PoiseInstruction::Label(no_label));
             }
-        }
+        },
+        parser::Statement::Label(name) => instructions.push(PoiseInstruction::Label(name)),
+        parser::Statement::Goto(name) => instructions.push(PoiseInstruction::Jump(name)),
         _ => todo!(),
     }
 }

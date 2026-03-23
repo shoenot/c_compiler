@@ -174,6 +174,7 @@ impl Tokenizer {
             "void" => TokenType::Void,
             "if" => TokenType::If,
             "else" => TokenType::Else,
+            "goto" => TokenType::Goto,
             _ => return None,
         };
 
