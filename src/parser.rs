@@ -35,7 +35,12 @@ pub struct Program {
 #[derive(Debug)]
 pub struct Function {
     pub identifier: String,
-    pub body: Vec<BlockItem>,
+    pub body: Block,
+}
+
+#[derive(Debug)]
+pub struct Block {
+    pub items: Vec<BlockItem>
 }
 
 #[derive(Debug)]
@@ -55,6 +60,7 @@ pub enum Statement {
     Return(Expression),
     Expression(Expression),
     If(Expression, Box<Statement>, Option<Box<Statement>>), // Else statements not mandatory. 
+    Compound(Block),
     Label(String), 
     Goto(String),
     Null,
@@ -176,17 +182,20 @@ impl Parser {
         self.expect(TokenType::OpenParen)?;
         self.expect(TokenType::Void)?;
         self.expect(TokenType::CloseParen)?;
-        self.expect(TokenType::OpenBrace)?;
-
-        let mut body = Vec::new();
-        while self.peek()?.token_type != TokenType::CloseBrace {
-            body.push(self.parse_blockitem()?);
-        }
-
-        self.expect(TokenType::CloseBrace)?;
+        let body = self.parse_block()?;
         Ok(Function {
             identifier, body
         })
+    }
+
+    fn parse_block(&mut self) -> Result<Block, ParseError> {
+        let mut blockitems = Vec::new();
+        self.expect(TokenType::OpenBrace)?;
+        while self.peek()?.token_type != TokenType::CloseBrace {
+            blockitems.push(self.parse_blockitem()?);
+        }
+        self.expect(TokenType::CloseBrace)?;
+        Ok(Block{ items: blockitems })
     }
 
     fn parse_blockitem(&mut self) -> Result<BlockItem, ParseError> {
@@ -260,6 +269,10 @@ impl Parser {
                     },
                     _ => return Err(ParseError::ExpectedIdentifier(self.current_span))
                 }
+            },
+            TokenType::OpenBrace => {
+                let block = self.parse_block()?;
+                Statement::Compound(block)
             },
             _ => {
                 let ret = Statement::Expression(self.parse_expression(0)?);

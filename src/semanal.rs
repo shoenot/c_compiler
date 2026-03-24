@@ -36,6 +36,8 @@ struct Counter {
     count: usize,
 }
 
+
+
 impl Counter {
     fn namegen(&mut self, name: &str) -> String {
         let new = format!("{}.{}", name, self.count);
@@ -52,7 +54,7 @@ fn resolve_program_vars(program: &mut Program,
     var_map: &mut HashMap<String, String>,
     label_map: &mut HashMap<String, (String, bool)>,
     counter: &mut Counter) -> Result<(), SemanticError> {
-    for blockitem in &mut program.function.body {
+    for blockitem in &mut program.function.body.items {
         match blockitem {
             BlockItem::S(s) => resolve_statement(s, var_map, label_map, counter)?,
             BlockItem::D(d) => resolve_declaration(d, var_map, counter)?,

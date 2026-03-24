@@ -1,11 +1,11 @@
 mod driver;
+mod tokens;
 mod lexer;
 mod parser;
+mod semanal;
+mod poise;
 mod codegen;
 mod emit;
-mod poise;
-mod semanal;
-mod tokens;
 use clap::Parser;
 use std::{path::PathBuf, process};
 use crate::driver::*;
