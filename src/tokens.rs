@@ -48,4 +48,9 @@ pub enum TokenType {
     If,
     Else,
     Goto,
+    Do,
+    While,
+    For,
+    Break,
+    Continue,
 }

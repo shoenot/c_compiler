@@ -130,6 +130,7 @@ fn resolve_statement(statement: &mut Statement,
             resolve_block(block, &mut new_map, label_map, counter)?;
             counter.current_block -= 1;
         },
+        _ => todo!()
     }
     Ok(())
 }

@@ -175,6 +175,11 @@ impl Tokenizer {
             "if" => TokenType::If,
             "else" => TokenType::Else,
             "goto" => TokenType::Goto,
+            "do" => TokenType::Do,
+            "while" => TokenType::While,
+            "for" => TokenType::For,
+            "break" => TokenType::Break,
+            "continue" => TokenType::Continue,
             _ => return None,
         };
 

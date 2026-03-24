@@ -55,6 +55,13 @@ pub struct Declaration {
     pub init: Option<Expression>,
 }
 
+// For loop initiator
+#[derive(Debug)]
+pub enum ForInit {
+    InitDec(Declaration),
+    InitExp(Option<Expression>),
+}
+
 #[derive(Debug)]
 pub enum Statement {
     Return(Expression),
@@ -63,6 +70,11 @@ pub enum Statement {
     Compound(Block),
     Label(String), 
     Goto(String),
+    While{cond: Expression, body: Box<Statement>, lab: String},
+    DoWhile{body: Box<Statement>, cond: Expression, lab: String},
+    For{init: ForInit, cond: Option<Expression>, post: Option<Expression>, body: Box<Statement>, lab: String},
+    Break(String),
+    Continue(String),
     Null,
 }
 
@@ -274,6 +286,37 @@ impl Parser {
                 let block = self.parse_block()?;
                 Statement::Compound(block)
             },
+            TokenType::While => {
+                self.advance()?;
+                self.expect(TokenType::OpenParen)?;
+                let cond = self.parse_expression(0)?;
+                self.expect(TokenType::CloseParen)?;
+                let body = Box::new(self.parse_statement()?);
+                Statement::While { cond, body, lab: "".into() }
+            },
+            TokenType::Do => {
+                self.advance()?;
+                let body = Box::new(self.parse_statement()?);
+                self.expect(TokenType::While)?;
+                self.expect(TokenType::OpenParen)?;
+                let cond = self.parse_expression(0)?;
+                self.expect(TokenType::CloseParen)?;
+                self.expect(TokenType::Semicolon)?;
+                Statement::DoWhile { cond, body, lab: "".into() }
+            },
+            TokenType::For => self.parse_for_loop()?,
+            TokenType::Break => {
+                self.advance()?;
+                let ret = Statement::Break("".into());
+                self.expect(TokenType::Semicolon)?;
+                ret
+            },
+            TokenType::Continue => {
+                self.advance()?;
+                let ret = Statement::Continue("".into());
+                self.expect(TokenType::Semicolon)?;
+                ret
+            },
             _ => {
                 let ret = Statement::Expression(self.parse_expression(0)?);
                 self.expect(TokenType::Semicolon)?;
@@ -281,6 +324,42 @@ impl Parser {
             },
         };
         Ok(statement)
+    }
+
+    fn parse_for_loop(&mut self) -> Result<Statement, ParseError> {
+        self.advance()?;
+        self.expect(TokenType::OpenParen)?;
+        let init = match self.peek()?.token_type {
+            TokenType::Int => {
+                let dec = self.parse_declaration()?;
+                ForInit::InitDec(dec)
+            },
+            TokenType::Semicolon => {
+                self.advance()?;
+                ForInit::InitExp(None)
+            },
+            _ => {
+                let exp = self.parse_expression(0)?;
+                self.expect(TokenType::Semicolon)?;
+                ForInit::InitExp(Some(exp))
+            }
+        };
+
+        let mut cond = None;
+        if self.peek()?.token_type != TokenType::Semicolon {
+            cond = Some(self.parse_expression(0)?);
+        } 
+        self.expect(TokenType::Semicolon)?;
+
+        let mut post = None;
+        if self.peek()?.token_type != TokenType::CloseParen {
+            post = Some(self.parse_expression(0)?);
+        } 
+        self.expect(TokenType::CloseParen)?;
+
+        let body = Box::new(self.parse_statement()?);
+
+        Ok(Statement::For { init, cond, post, body, lab: "".into() })
     }
 
     fn parse_expression(&mut self, min_prec: i32) -> Result<Expression, ParseError> {
