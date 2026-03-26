@@ -98,12 +98,12 @@ fn gen_inst_block(block: parser::Block, instructions: &mut Vec<PoiseInstruction>
     for blockitem in block.items {
         match blockitem {
             parser::BlockItem::S(s) => gen_inst_statement(s, instructions, count),
-            parser::BlockItem::D(d) => gen_inst_declaration(d, instructions, count),
+            parser::BlockItem::D(parser::Decl::VarDecl(d)) => gen_inst_var_declaration(d, instructions, count),
         }
     }
 }
 
-fn gen_inst_declaration(declaration: parser::Declaration, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount) {
+fn gen_inst_var_declaration(declaration: parser::VarDeclaration, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount) {
     if let Some(exp) = declaration.init {
         let val = emit_expression(exp, instructions, count);
         instructions.push(PoiseInstruction::Copy { src: val, dst: PoiseVal::Variable(declaration.identifier) });
@@ -167,7 +167,7 @@ fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<Poise
             if let parser::ForInit::InitExp(Some(exp)) = init {
                 emit_expression(exp, instructions, count);
             } else if let parser::ForInit::InitDec(dec) = init {
-                gen_inst_declaration(dec, instructions, count);
+                gen_inst_var_declaration(dec, instructions, count);
             }
             instructions.push(PoiseInstruction::Label(count.loop_label_string(lab.clone(), "start")));
             if let Some(cond) = cond {

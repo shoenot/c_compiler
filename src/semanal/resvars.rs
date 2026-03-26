@@ -27,7 +27,7 @@ fn resolve_block(block: &mut Block,
     for blockitem in &mut block.items {
         match blockitem {
             BlockItem::S(s) => resolve_statement(s, var_map, label_map, counter)?,
-            BlockItem::D(d) => resolve_declaration(d, var_map, counter)?,
+            BlockItem::D(Decl::VarDecl(d)) => resolve_var_declaration(d, var_map, counter)?,
         }
     }
     Ok(())
@@ -133,7 +133,7 @@ fn resolve_statement(statement: &mut Statement,
     Ok(())
 }
 
-fn resolve_declaration(declaration: &mut Declaration,
+fn resolve_var_declaration(declaration: &mut VarDeclaration,
     var_map: &mut HashMap<String, (String, usize)>,
     counter: &mut Counter) -> Result<(), SemanticError> {
 
@@ -202,7 +202,7 @@ fn resolve_expression(expression: &mut Expression,
 
 fn resolve_for_init(init: &mut ForInit, var_map: &mut HashMap<String, (String, usize)>, counter: &mut Counter) -> Result<(), SemanticError> {
     if let ForInit::InitDec(dec) = init {
-        resolve_declaration(dec, var_map, counter)?;
+        resolve_var_declaration(dec, var_map, counter)?;
     } else if let ForInit::InitExp(Some(exp)) = init {
         resolve_expression(exp, var_map, counter)?;
     }

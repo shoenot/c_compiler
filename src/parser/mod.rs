@@ -120,13 +120,13 @@ impl Parser {
 
     fn parse_blockitem(&mut self) -> Result<BlockItem, ParseError> {
         let item = match self.peek()?.token_type {
-            TokenType::Int => BlockItem::D(self.parse_declaration()?),
+            TokenType::Int => BlockItem::D(Decl::VarDecl(self.parse_var_declaration()?)),
             _ => BlockItem::S(self.parse_statement()?),
         };
         Ok(item)
     }
 
-    fn parse_declaration(&mut self) -> Result<Declaration, ParseError> {
+    fn parse_var_declaration(&mut self) -> Result<VarDeclaration, ParseError> {
         self.expect(TokenType::Int)?;
         let identifier = self.expect_ident()?;
         let mut init = None;
@@ -135,7 +135,7 @@ impl Parser {
             init = Some(self.parse_expression(0)?);
         }
         self.expect(TokenType::Semicolon)?;
-        Ok(Declaration{identifier, init})
+        Ok(VarDeclaration{identifier, init})
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
@@ -266,7 +266,7 @@ impl Parser {
         self.expect(TokenType::OpenParen)?;
         let init = match self.peek()?.token_type {
             TokenType::Int => {
-                let dec = self.parse_declaration()?;
+                let dec = self.parse_var_declaration()?;
                 ForInit::InitDec(dec)
             },
             TokenType::Semicolon => {

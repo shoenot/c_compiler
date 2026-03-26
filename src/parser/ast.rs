@@ -17,11 +17,16 @@ pub struct Block {
 #[derive(Debug)]
 pub enum BlockItem {
     S(Statement),
-    D(Declaration),
+    D(Decl),
 }
 
 #[derive(Debug)]
-pub struct Declaration {
+pub enum Decl {
+    VarDecl(VarDeclaration),
+}
+
+#[derive(Debug)]
+pub struct VarDeclaration {
     pub identifier: String,
     pub init: Option<Expression>,
 }
@@ -29,7 +34,7 @@ pub struct Declaration {
 // For loop initiator
 #[derive(Debug)]
 pub enum ForInit {
-    InitDec(Declaration),
+    InitDec(VarDeclaration),
     InitExp(Option<Expression>),
 }
 
