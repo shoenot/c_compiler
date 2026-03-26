@@ -6,7 +6,7 @@ use std::{fmt};
 use std::collections::HashMap;
 use crate::codegen::{AsmProgram, gen_program};
 use crate::lexer::{Token, Tokenizer};
-use crate::parser::{Parser, Program, pretty_print};
+use crate::parser::{Parser, Program};
 use crate::semanal::semantic_analysis;
 use crate::poise::{PoiseProg, gen_poise};
 use crate::emit::emit_program;
@@ -96,26 +96,34 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
 
     let mut parsed = run_parser(lexed)?;
     if args.parse {
-        pretty_print(parsed);
+        for item in parsed.function.body.items {
+            println!("{:?}", item);
+        }
         std::process::exit(0);
     }
 
     let mut var_map = run_semanal(&mut parsed)?;
     if args.validate {
-        println!("{:#?}", parsed);
+        for item in parsed.function.body.items {
+            println!("{:?}", item);
+        }
         println!("{:#?}", var_map);
         std::process::exit(0);
     }
 
     let poise = run_poise(parsed);
     if args.tacky {
-        println!("{:#?}", poise);
+        for item in poise.function.body {
+            println!("{:?}", item);
+        }
         std::process::exit(0);
     }
 
     let asm = run_codegen(poise);
     if args.codegen {
-        println!("{:#?}", asm);
+        for item in asm.function.body {
+            println!("{:?}", item);
+        }
         std::process::exit(0);
     }
     

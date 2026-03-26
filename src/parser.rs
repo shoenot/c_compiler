@@ -8,9 +8,11 @@ use crate::lexer::*; use crate::tokens::TokenType;
 pub enum ParseError {
     UnexpectedToken(TokenType, Span),
     UnexpectedEOF,
+    ExpectedStatement(Span),
     Unimplemented(Span),
     ExpectedIdentifier(Span),
     ExpectedExpression(Span),
+    LabelWithoutStatement(Span),
 }
 
 impl fmt::Display for ParseError {
@@ -19,8 +21,10 @@ impl fmt::Display for ParseError {
             ParseError::UnexpectedToken(t, s) => write!(f, "Parse Error: unexpected token! {:#?}\nLine: {}, Col: {}", t, s.line_number, s.col),
             ParseError::Unimplemented(s) => write!(f, "This operation is not implemented yet!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::UnexpectedEOF => write!(f, "Parse Error: unexpected EOF!"),
+            ParseError::ExpectedStatement(s) => write!(f, "Parse Error: expected statement!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::ExpectedIdentifier(s) => write!(f, "Parse Error: expected identifier!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::ExpectedExpression(s) => write!(f, "Parse Error: expected expression!\nLine: {}, Col: {}", s.line_number, s.col),
+            ParseError::LabelWithoutStatement(s) => write!(f, "Parse Error: label without statement!\nLine: {}, Col: {}", s.line_number, s.col),
         }
     }
 }
@@ -68,7 +72,7 @@ pub enum Statement {
     Expression(Expression),
     If(Expression, Box<Statement>, Option<Box<Statement>>), // Else statements not mandatory. 
     Compound(Block),
-    Label(String), 
+    Label(String, Box<Statement>), 
     Goto(String),
     While{cond: Expression, body: Box<Statement>, lab: String},
     DoWhile{body: Box<Statement>, cond: Expression, lab: String},
@@ -264,9 +268,16 @@ impl Parser {
             TokenType::Identifier(name) => {
                 self.advance()?;
                 if self.peek()?.token_type == TokenType::Colon {
-                    let ret = Statement::Label(name);
                     self.expect(TokenType::Colon)?;
-                    ret
+                    let body = self.parse_statement();
+                    let body = match body {
+                        Ok(st) => st,
+                        Err(e) => match e {
+                            ParseError::ExpectedStatement(_) => return Err(e),
+                            _ => return Err(ParseError::LabelWithoutStatement(self.current_span)),
+                        }
+                    };
+                    Statement::Label(name, Box::new(body))
                 } else {
                     let mut expr = Expression::Var(name);
                     expr = self.check_postfix(expr)?;
@@ -340,6 +351,7 @@ impl Parser {
                 self.expect(TokenType::Colon)?;
                 Statement::Default{lab:"".into()}
             },
+            TokenType::Int => return Err(ParseError::ExpectedStatement(self.current_span)),
             _ => {
                 let ret = Statement::Expression(self.parse_expression(0)?);
                 self.expect(TokenType::Semicolon)?;
@@ -541,7 +553,3 @@ impl Parser {
         }
     }
 }
-
-pub fn pretty_print(tree: Program) {
-    println!("{:#?}", tree);
-} 

@@ -18,6 +18,7 @@ pub enum SemanticError {
     NonConstantCase,
     DuplicateCase,
     DuplicateDefault,
+    DecInCase,
 }
 
 impl fmt::Display for SemanticError {
@@ -36,6 +37,7 @@ impl fmt::Display for SemanticError {
             SemanticError::NonConstantCase => write!(f, "Non constant case"),
             SemanticError::DuplicateCase => write!(f, "Duplicate case"),
             SemanticError::DuplicateDefault => write!(f, "Duplicate label"),
+            SemanticError::DecInCase => write!(f, "Dec in case"),
         }
     }
 }
@@ -44,7 +46,6 @@ impl std::error::Error for SemanticError {}
 
 pub fn semantic_analysis(program: &mut Program) -> Result<HashMap<String, (String, usize)>, SemanticError> {
     let map = variable_resolution_pass(program)?;
-    label_semantic_analysis_pass(program)?;
     loop_labeling_pass(program)?;
     switch_collection_pass(program)?;
     Ok(map)
@@ -140,7 +141,10 @@ fn resolve_statement(statement: &mut Statement,
                 resolve_statement(n, var_map, label_map, counter)?;
             }
         },
-        Statement::Label(name) => process_label(name, label_map, counter)?,
+        Statement::Label(name, st) => {
+            process_label(name, label_map, counter)?;
+            resolve_statement(st, var_map, label_map, counter)?;
+        },
         Statement::Goto(name) => process_goto(name, label_map, counter)?,
         Statement::Compound(block) => {
             let mut new_map = var_map.clone();
@@ -263,34 +267,34 @@ fn check_undeclared_label(label_map: HashMap<String, (String, bool)>) -> Result<
     Ok(())
 }
 
-// Label semantic analysis pass 
-fn check_label_before_dec(items: &Vec<BlockItem>) -> Result<(), SemanticError> {
-    // Check if label is before a declaration 
-    for i in 0..items.len() {
-        if let BlockItem::S(Statement::Compound(block)) = &items[i] {
-            check_label_before_dec(&block.items)?;
-        }
-
-        if i + 1 < items.len() {
-            if let BlockItem::S(Statement::Label(name)) = &items[i] {
-                if let BlockItem::D(_) = &items[i+1] {
-                    return Err(SemanticError::LabelBeforeDeclaration(name.clone()));
-                }
-            } 
-        }
-    }
-
-    // Check if label is the last statement in a block
-    if let Some(BlockItem::S(Statement::Label(_))) = items.last() {
-        return Err(SemanticError::LabelWithoutStatement);
-    }
-    Ok(())
-}
-
-fn label_semantic_analysis_pass(program: &mut Program) -> Result<(), SemanticError> {
-    let items = &program.function.body.items;
-    check_label_before_dec(items)
-}
+// // Label semantic analysis pass 
+// fn check_label_before_dec(items: &Vec<BlockItem>) -> Result<(), SemanticError> {
+//     // Check if label is before a declaration 
+//     for i in 0..items.len() {
+//         if let BlockItem::S(Statement::Compound(block)) = &items[i] {
+//             check_label_before_dec(&block.items)?;
+//         }
+//
+//         if i + 1 < items.len() {
+//             if let BlockItem::S(Statement::Label(name, _)) = &items[i] {
+//                 if let BlockItem::D(_) = &items[i+1] {
+//                     return Err(SemanticError::LabelBeforeDeclaration(name.clone()));
+//                 }
+//             } 
+//         }
+//     }
+//
+//     // Check if label is the last statement in a block
+//     if let Some(BlockItem::S(Statement::Label(_, _))) = items.last() {
+//         return Err(SemanticError::LabelWithoutStatement);
+//     }
+//     Ok(())
+// }
+//
+// fn label_semantic_analysis_pass(program: &mut Program) -> Result<(), SemanticError> {
+//     let items = &program.function.body.items;
+//     check_label_before_dec(items)
+// }
 
 fn eval_constant(expr: &Expression) -> Option<i32> {
     match expr {
@@ -399,6 +403,9 @@ fn assign_label(st: &mut Statement, count: &mut LoopCounter) -> Result<(), Seman
         Statement::Compound(block) => {
             assign_loop_labels(&mut block.items, count)?;
         },
+        Statement::Label(_, body) => {
+            assign_label(body, count)?;
+        }
         Statement::If(_, yes, no) => {
             assign_label(yes, count)?;
             if let Some(no) = no {
@@ -452,7 +459,25 @@ fn collect_cases_in_block(items: &Vec<BlockItem>) -> Result<Vec<(Option<Expressi
             },
             BlockItem::S(Statement::Compound(bl)) => {
                 cases.append(&mut collect_cases_in_block(&bl.items)?);
-            }
+            },
+            BlockItem::S(Statement::If(_, yes, no)) => {
+                cases.append(&mut collect_switch_cases(yes)?);
+                if let Some(no) = no {
+                    cases.append(&mut collect_switch_cases(no)?);
+                }
+            },
+            BlockItem::S(Statement::Label(_, body)) => {
+                cases.append(&mut collect_switch_cases(body)?);
+            },
+            BlockItem::S(Statement::For {body,..}) |
+            BlockItem::S(Statement::While {body,..}) |
+            BlockItem::S(Statement::DoWhile {body,..}) => {
+                if let Statement::Compound(bl) = body.as_ref() {
+                    cases.append(&mut collect_cases_in_block(&bl.items)?);
+                } else {
+                    cases.append(&mut collect_switch_cases(body)?);
+                }
+            },
             BlockItem::S(_) | BlockItem::D(_) => {},
         }
     }
@@ -488,6 +513,9 @@ fn statement_collector(st: &mut Statement) -> Result<(), SemanticError> {
                 let default_count = cases.iter().filter(|(expr,_)| expr.is_none()).count();
                 if default_count > 1 { return Err(SemanticError::DuplicateDefault); }
 
+                // if let Statement::Compound(block) = body.as_ref() {
+                //     check_block_for_decs(&block)?;
+                // } 
                 statement_collector(body)?;
             },
             Statement::If(_, yes, no) => {
@@ -495,6 +523,9 @@ fn statement_collector(st: &mut Statement) -> Result<(), SemanticError> {
                 if let Some(no) = no {
                     statement_collector(no)?;
                 }
+            },
+            Statement::Label(_, body) => {
+                statement_collector(body)?;
             },
             Statement::While { body, .. } => {
                 statement_collector(body)?;
@@ -521,6 +552,16 @@ fn block_collector(items: &mut Vec<BlockItem>) -> Result<(), SemanticError> {
     }
     Ok(())
 }
+
+// fn check_block_for_decs(block: &Block) -> Result<(), SemanticError> {
+//     for item in &block.items {
+//         match item {
+//             BlockItem::D(Declaration { init:Some(_),.. }) => return Err(SemanticError::DecInCase),
+//             _ => {}
+//         }
+//     }
+//     Ok(())
+// }
 
 fn switch_collection_pass(program: &mut Program) -> Result<(), SemanticError> {
     block_collector(&mut program.function.body.items)?;

@@ -139,7 +139,10 @@ fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<Poise
                 instructions.push(PoiseInstruction::Label(no_label));
             }
         },
-        parser::Statement::Label(name) => instructions.push(PoiseInstruction::Label(name)),
+        parser::Statement::Label(name, body) => {
+            instructions.push(PoiseInstruction::Label(name));
+            gen_inst_statement(*body, instructions, count);
+        },
         parser::Statement::Goto(name) => instructions.push(PoiseInstruction::Jump(name)),
         parser::Statement::Compound(block) => gen_inst_block(block, instructions, count),
         parser::Statement::Break(lab) => instructions.push(PoiseInstruction::Jump(count.loop_label_string(lab, "break"))),

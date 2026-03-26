@@ -205,8 +205,9 @@ fn binary_handler(op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseV
         }
         PoiseBinaryOp::Equal | PoiseBinaryOp::NotEqual | PoiseBinaryOp::GreaterThan |
         PoiseBinaryOp::GreaterOrEqual | PoiseBinaryOp::LessThan | PoiseBinaryOp::LessOrEqual => {
+            println!("s1:{:?} s2:{:?} d:{:?}", s1.clone(), s2.clone(), d.clone());
             generated.push(AsmInstruction::Cmp(s2.clone(), s1));
-            generated.push(AsmInstruction::Movb(Operand::Imm(0), d.clone()));
+            generated.push(AsmInstruction::Mov(Operand::Imm(0), d.clone()));
             generated.push(AsmInstruction::SetCC(gen_conditional(op), d));
         }
     }
