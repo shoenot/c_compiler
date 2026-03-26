@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use crate::parser::{self, BlockItem};
+use crate::parser;
 
 #[derive(Debug)]
 pub struct PoiseProg {
@@ -209,7 +207,6 @@ fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<Poise
         parser::Statement::Default { lab } => {
             instructions.push(PoiseInstruction::Label(count.loop_label_string(lab.clone(), "default")));
         },
-        _ => todo!(),
     }
 }
 
@@ -293,7 +290,6 @@ fn emit_expression(
             });
             tmp
         },
-        _ => todo!(),
     }
 }
 
@@ -322,7 +318,7 @@ fn emit_bin_exp(op: parser::BinaryOp,
             parser::BinaryOp::GreaterThan => PoiseBinaryOp::GreaterThan,
             parser::BinaryOp::LessOrEqual => PoiseBinaryOp::LessOrEqual,
             parser::BinaryOp::GreaterOrEqual => PoiseBinaryOp::GreaterOrEqual,
-            _ => todo!()
+            _ => unreachable!()
         };
         let v1 = emit_expression(exp1, instructions, count);
         let v2 = emit_expression(exp2, instructions, count);

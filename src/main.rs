@@ -1,5 +1,4 @@
 mod driver;
-mod tokens;
 mod lexer;
 mod parser;
 mod semanal;
@@ -10,7 +9,7 @@ use clap::Parser;
 use std::{path::PathBuf, process};
 use crate::driver::*;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 struct Args {
     input_file: PathBuf,
     #[arg(short)]
@@ -25,6 +24,8 @@ struct Args {
     tacky: bool,
     #[arg(long)]
     codegen: bool,
+    #[arg(short)]
+    c: bool
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
 
-    let compiled = match run_compiler(&preprocessed, args) {
+    let compiled = match run_compiler(&preprocessed, args.clone()) {
         Ok(pb) => pb,
         Err(e) => {
             eprintln!("{}", e);
@@ -47,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
 
-    match run_assembler(&compiled) {
+    match run_assembler(&compiled, args) {
         Ok(pb) => pb,
         Err(e) => {
             eprintln!("{}", e);

@@ -2,14 +2,16 @@ use std::iter::Peekable;
 use std::vec::IntoIter;
 use std::fmt;
 
-use crate::lexer::*; use crate::tokens::TokenType;
+use crate::lexer::*; 
+
+mod ast;
+pub use ast::*;
 
 #[derive(Debug)]
 pub enum ParseError {
     UnexpectedToken(TokenType, Span),
     UnexpectedEOF,
     ExpectedStatement(Span),
-    Unimplemented(Span),
     ExpectedIdentifier(Span),
     ExpectedExpression(Span),
     LabelWithoutStatement(Span),
@@ -19,7 +21,6 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ParseError::UnexpectedToken(t, s) => write!(f, "Parse Error: unexpected token! {:#?}\nLine: {}, Col: {}", t, s.line_number, s.col),
-            ParseError::Unimplemented(s) => write!(f, "This operation is not implemented yet!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::UnexpectedEOF => write!(f, "Parse Error: unexpected EOF!"),
             ParseError::ExpectedStatement(s) => write!(f, "Parse Error: expected statement!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::ExpectedIdentifier(s) => write!(f, "Parse Error: expected identifier!\nLine: {}, Col: {}", s.line_number, s.col),
@@ -30,107 +31,6 @@ impl fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError { }
-
-#[derive(Debug)]
-pub struct Program {
-    pub function: Function,
-}
-
-#[derive(Debug)]
-pub struct Function {
-    pub identifier: String,
-    pub body: Block,
-}
-
-#[derive(Debug)]
-pub struct Block {
-    pub items: Vec<BlockItem>
-}
-
-#[derive(Debug)]
-pub enum BlockItem {
-    S(Statement),
-    D(Declaration),
-}
-
-#[derive(Debug)]
-pub struct Declaration {
-    pub identifier: String,
-    pub init: Option<Expression>,
-}
-
-// For loop initiator
-#[derive(Debug)]
-pub enum ForInit {
-    InitDec(Declaration),
-    InitExp(Option<Expression>),
-}
-
-#[derive(Debug)]
-pub enum Statement {
-    Return(Expression),
-    Expression(Expression),
-    If(Expression, Box<Statement>, Option<Box<Statement>>), // Else statements not mandatory. 
-    Compound(Block),
-    Label(String, Box<Statement>), 
-    Goto(String),
-    While{cond: Expression, body: Box<Statement>, lab: String},
-    DoWhile{body: Box<Statement>, cond: Expression, lab: String},
-    For{init: ForInit, cond: Option<Expression>, post: Option<Expression>, body: Box<Statement>, lab: String},
-    Switch{scrutinee: Expression, body: Box<Statement>, lab: String, cases:Vec<(Option<Expression>, String)>},
-    Case{expr: Expression, lab: String},
-    Default{lab: String},
-    Break(String),
-    Continue(String),
-    Null,
-}
-
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
-    Constant(i32),
-    Var(String),
-    Assignment(Box<Expression>, Box<Expression>),
-    Unary(UnaryOp, Box<Expression>),
-    Binary(BinaryOp, Box<Expression>, Box<Expression>),
-    Conditional(Box<Expression>, Box<Expression>, Box<Expression>),
-    PrefixIncrement(Box<Expression>),
-    PostfixIncrement(Box<Expression>),
-    PrefixDecrement(Box<Expression>),
-    PostfixDecrement(Box<Expression>),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum UnaryOp {
-    Complement,
-    Negate,
-    Not,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum BinaryOp {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Remainder,
-    BitwiseAnd,
-    BitwiseOr,
-    BitwiseXor,
-    LeftShift,
-    RightShift,
-    LogicalAnd,
-    LogicalOr,
-    Equal,
-    NotEqual,
-    LessThan,
-    LessOrEqual,
-    GreaterThan,
-    GreaterOrEqual,
-    Set,
-    OpSet(Box<BinaryOp>),
-    Ternary,
-}
 
 #[derive(Debug)]
 pub struct Parser {
@@ -441,7 +341,7 @@ impl Parser {
 
     fn parse_factor(&mut self) -> Result<Expression, ParseError> {
         let token = self.advance()?;
-        let mut expr = match token.token_type {
+        let expr = match token.token_type {
             TokenType::Constant(value) => Expression::Constant(value),
             TokenType::OpenParen => {
                 let expression = self.parse_expression(0)?;

@@ -96,7 +96,6 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String) -> Result<
             output.push_str("\tpopq\t%rbp\n");
             output.push_str("\tret\n");
         },
-        _ => todo!()
     }
     Ok(())
 }

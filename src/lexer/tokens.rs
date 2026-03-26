@@ -42,6 +42,7 @@ pub enum TokenType {
     DRAngledEqual,
     QuestionMark,
     Colon,
+    Comma,  
     Int,
     Void,
     Return,

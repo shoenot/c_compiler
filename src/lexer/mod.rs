@@ -1,7 +1,8 @@
 use std::{
     iter::Peekable, vec::IntoIter, fmt,
 };
-use crate::tokens::TokenType;
+pub mod tokens;
+pub use tokens::TokenType;
 
 #[derive(Debug)]
 pub enum LexerError {
@@ -113,6 +114,7 @@ impl Tokenizer {
             '~' => TokenType::Tilde,
             '?' => TokenType::QuestionMark,
             ':' => TokenType::Colon,
+            ',' => TokenType::Comma,
             '*' => self.is_double_char('=', TokenType::Asterisk, TokenType::AsteriskEqual),
             '/' => self.is_double_char('=', TokenType::FwdSlash, TokenType::FwdSlashEqual),
             '%' => self.is_double_char('=', TokenType::Percent, TokenType::PercentEqual),

@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+mod stack;
+use stack::*;
 
 use crate::poise::{self, PoiseBinaryOp, PoiseVal};
 #[derive(Debug)]
@@ -210,102 +211,5 @@ fn binary_handler(op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseV
             generated.push(AsmInstruction::Mov(Operand::Imm(0), d.clone()));
             generated.push(AsmInstruction::SetCC(gen_conditional(op), d));
         }
-    }
-}
-
-fn assign_stack_slots(func: AsmFunction) -> AsmFunction {
-    let mut new_instructions = Vec::new();
-    let mut map: HashMap<String, i32> = HashMap::new();
-    let mut offset: i32 = 0;
-    for instruction in func.body {
-        match instruction {
-            AsmInstruction::Ret => new_instructions.push(AsmInstruction::Ret),
-            AsmInstruction::Mov(src, dst)  => {
-                let src = resolve_operand(src, &mut map, &mut offset);
-                let dst = resolve_operand(dst, &mut map, &mut offset);
-                match (&src, &dst) {
-                    (Operand::Stack(_), Operand::Stack(_)) => {
-                        new_instructions.push(AsmInstruction::Mov(src, Operand::Reg(Register::R10)));
-                        new_instructions.push(AsmInstruction::Mov(Operand::Reg(Register::R10), dst));
-                    },
-                    _ => new_instructions.push(AsmInstruction::Mov(src, dst)),
-                }
-            },
-            AsmInstruction::Movb(src, dst) => {
-                let src = resolve_operand(src, &mut map, &mut offset);
-                let dst = resolve_operand(dst, &mut map, &mut offset);
-                new_instructions.push(AsmInstruction::Movb(src, Operand::Reg(Register::R10)));
-                new_instructions.push(AsmInstruction::Movb(Operand::Reg(Register::R10), dst));
-            },
-            AsmInstruction::Unary(op, dst) => new_instructions.push(
-                AsmInstruction::Unary(op, resolve_operand(dst, &mut map, &mut offset))
-            ),
-            AsmInstruction::Binary(op, src, dst) => {
-                let src = resolve_operand(src, &mut map, &mut offset);
-                let dst = resolve_operand(dst, &mut map, &mut offset);
-                match op {
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
-                       match (&src, &dst) {
-                           (Operand::Stack(_), Operand::Stack(_)) => {
-                               new_instructions.push(AsmInstruction::Mov(src, Operand::Reg(Register::R10)));
-                               new_instructions.push(AsmInstruction::Binary(op, Operand::Reg(Register::R10), dst));
-                           },
-                           _ => new_instructions.push(AsmInstruction::Binary(op, src, dst)),
-                       }
-                    },
-                    BinaryOp::Mult => {
-                        match &dst {
-                            Operand::Stack(_) => {
-                                new_instructions.push(AsmInstruction::Mov(dst.clone(), Operand::Reg(Register::R11)));
-                                new_instructions.push(AsmInstruction::Binary(op, src, Operand::Reg(Register::R11)));
-                                new_instructions.push(AsmInstruction::Mov(Operand::Reg(Register::R11), dst));
-                            },
-                           _ => new_instructions.push(AsmInstruction::Binary(op, src, dst)),
-                        }
-                    },
-                    BinaryOp::Sal | BinaryOp::Sar => {
-                        new_instructions.push(AsmInstruction::Binary(op, src, dst));
-                    }
-                }
-            }
-            AsmInstruction::Idiv(src) => {
-                 let src = resolve_operand(src, &mut map, &mut offset);
-                 match &src {
-                     Operand::Imm(_) => {
-                         new_instructions.push(AsmInstruction::Mov(src, Operand::Reg(Register::R10)));
-                         new_instructions.push(AsmInstruction::Idiv(Operand::Reg(Register::R10)));
-                     },
-                     _ => new_instructions.push(AsmInstruction::Idiv(src)),
-                 }
-            },
-            AsmInstruction::Cmp(v1, v2) => {
-                let v1 = resolve_operand(v1, &mut map, &mut offset);
-                let v2 = resolve_operand(v2, &mut map, &mut offset);
-                match (&v1, &v2) {
-                   (Operand::Stack(_), Operand::Stack(_)) | (_, Operand::Imm(_)) => {
-                       new_instructions.push(AsmInstruction::Mov(v2, Operand::Reg(Register::R11)));
-                       new_instructions.push(AsmInstruction::Cmp(v1, Operand::Reg(Register::R11)));
-                   },
-                   _ => new_instructions.push(AsmInstruction::Cmp(v1, v2)),
-                }
-            },
-            AsmInstruction::SetCC(cond, dst) => {
-                let dst = resolve_operand(dst, &mut map, &mut offset);
-                new_instructions.push(AsmInstruction::SetCC(cond, dst));
-            },
-            other => new_instructions.push(other),
-        }
-    }
-    new_instructions.insert(0, AsmInstruction::AllocateStack(offset.abs()));
-    AsmFunction { name: func.name, body: new_instructions }
-}
-
-fn resolve_operand(op: Operand, map: &mut HashMap<String, i32>, offset: &mut i32) -> Operand {
-    match op {
-        Operand::Pseudo(ident) => {
-            let stackoffset = map.entry(ident).or_insert_with(|| { *offset -= 4; *offset });
-            Operand::Stack(*stackoffset)
-        },
-        other => other,
     }
 }

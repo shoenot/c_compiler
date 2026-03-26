@@ -90,7 +90,9 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
     let lexed = run_lexer(&preprocessed)?;
     std::fs::remove_file(preprocessed)?;
     if args.lex {
-        println!("{:#?}", lexed);
+        for item in lexed {
+            println!("{:?}", item);
+        };
         std::process::exit(0);
     } 
 
@@ -102,7 +104,7 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
         std::process::exit(0);
     }
 
-    let mut var_map = run_semanal(&mut parsed)?;
+    let var_map = run_semanal(&mut parsed)?;
     if args.validate {
         for item in parsed.function.body.items {
             println!("{:?}", item);
@@ -132,11 +134,17 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
     run_emitter(asm, &output_file)?;
     Ok(output_file.to_path_buf())
 }
-pub fn run_assembler(input_file: &PathBuf) -> Result<PathBuf, DriverError> {
+
+pub fn run_assembler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, DriverError> {
     let mut output_file = input_file.clone();
     output_file.set_extension("");
+    let mut gcc_args = vec![input_file.to_str().unwrap()];
+    if args.c {
+        gcc_args.push("c")
+    }
+    gcc_args.append(&mut vec!["-o", &output_file.to_str().unwrap()]);
     match Command::new("gcc")
-        .args([&input_file.to_str().unwrap(), "-o", &output_file.to_str().unwrap()])
+        .args(gcc_args)
         .output() {
             Ok(output) => {
                 if output.status.success() {
