@@ -197,10 +197,9 @@ fn gen_inst_statement(statement: parser::Statement, instructions: &mut Vec<Poise
             for case in cases {
                 if let (None, clab) = case {
                     instructions.push(PoiseInstruction::Jump(count.loop_label_string(clab.clone(), "default")));
-                } else {
-                    instructions.push(PoiseInstruction::Jump(count.loop_label_string(lab.clone(), "break")));
                 }
             }
+            instructions.push(PoiseInstruction::Jump(count.loop_label_string(lab.clone(), "break")));
             gen_inst_statement(*body, instructions, count);
             instructions.push(PoiseInstruction::Label(count.loop_label_string(lab.clone(), "break")));
         },

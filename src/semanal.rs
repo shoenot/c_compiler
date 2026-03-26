@@ -513,9 +513,9 @@ fn statement_collector(st: &mut Statement) -> Result<(), SemanticError> {
                 let default_count = cases.iter().filter(|(expr,_)| expr.is_none()).count();
                 if default_count > 1 { return Err(SemanticError::DuplicateDefault); }
 
-                // if let Statement::Compound(block) = body.as_ref() {
-                //     check_block_for_decs(&block)?;
-                // } 
+                if let Statement::Compound(block) = body.as_ref() {
+                    check_block_for_decs(&block)?;
+                } 
                 statement_collector(body)?;
             },
             Statement::If(_, yes, no) => {
@@ -553,15 +553,15 @@ fn block_collector(items: &mut Vec<BlockItem>) -> Result<(), SemanticError> {
     Ok(())
 }
 
-// fn check_block_for_decs(block: &Block) -> Result<(), SemanticError> {
-//     for item in &block.items {
-//         match item {
-//             BlockItem::D(Declaration { init:Some(_),.. }) => return Err(SemanticError::DecInCase),
-//             _ => {}
-//         }
-//     }
-//     Ok(())
-// }
+fn check_block_for_decs(block: &Block) -> Result<(), SemanticError> {
+    let items = &block.items;
+    for window in items.windows(2) {
+        if let [BlockItem::S(Statement::Case { .. } | Statement::Default { .. }), BlockItem::D(_)] = window {
+            return Err(SemanticError::DecInCase);
+        }
+    }
+    Ok(())
+}
 
 fn switch_collection_pass(program: &mut Program) -> Result<(), SemanticError> {
     block_collector(&mut program.function.body.items)?;
