@@ -120,9 +120,9 @@ fn check_expression(expression: &mut Expression, symbols: &mut HashMap<String, S
                             check_expression(arg, symbols)?;
                         }
                     }
+                } else {
+                    return Err(SemanticError::VarCalledAsFunc(identifier.clone()));
                 }
-            } else {
-                return Err(SemanticError::VarCalledAsFunc(identifier.clone()));
             }
         },
         Expression::Var(identifier) => {

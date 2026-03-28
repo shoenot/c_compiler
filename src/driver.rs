@@ -152,10 +152,12 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
 pub fn run_assembler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, DriverError> {
     let mut output_file = input_file.clone();
     output_file.set_extension("");
-    let mut gcc_args = vec![input_file.to_str().unwrap()];
+    let mut gcc_args = vec![];
     if args.c {
-        gcc_args.push("c")
+        gcc_args.push("-c");
+        output_file.set_extension("o");
     }
+    gcc_args.push(input_file.to_str().unwrap());
     gcc_args.append(&mut vec!["-o", &output_file.to_str().unwrap()]);
     match Command::new("gcc")
         .args(gcc_args)
