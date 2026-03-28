@@ -4,10 +4,10 @@ use std::error::Error;
 use std::fs;
 use std::{fmt};
 use std::collections::HashMap;
-//use crate::codegen::{AsmProgram, gen_program};
+use crate::codegen::{AsmProgram, gen_program};
 use crate::lexer::{Token, Tokenizer};
 use crate::parser::{Parser, Program};
-use crate::semanal::semantic_analysis;
+use crate::semanal::{semantic_analysis, Type, Symbol};
 use crate::poise::{PoiseProg, gen_poise};
 use crate::emit::emit_program;
 
@@ -66,8 +66,8 @@ fn run_parser(tokens: Vec<Token>) -> Result<Program, Box<dyn Error>> {
     Ok(program)
 }
 
-fn run_semanal(program: &mut Program) -> Result<HashMap<String, (String, usize, bool)>, Box<dyn Error>> {
-    let var_map = semantic_analysis(program)?;
+fn run_semanal(program: &mut Program, symbols: &mut HashMap<String, Symbol>) -> Result<HashMap<String, (String, usize, bool)>, Box<dyn Error>> {
+    let var_map = semantic_analysis(program, symbols)?;
     Ok(var_map)
 }
 
@@ -75,16 +75,16 @@ fn run_poise(program: Program) -> PoiseProg {
     gen_poise(&program)
 }
 
-// fn run_codegen(program: PoiseProg) -> AsmProgram {
-//     gen_program(program)
-// }
+fn run_codegen(program: PoiseProg) -> AsmProgram {
+    gen_program(program)
+}
 
 
-// fn run_emitter(asm_program: AsmProgram, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
-//     fs::write(&output_file, emit_program(asm_program)?)?;
-//     Ok(output_file.to_path_buf())
-// }
-//
+fn run_emitter(asm_program: AsmProgram, symbols: &mut HashMap<String, Symbol>, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
+    fs::write(&output_file, emit_program(asm_program, symbols)?)?;
+    Ok(output_file.to_path_buf())
+}
+
 pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, Box<dyn Error>> {
     let preprocessed = input_file.clone();
     let lexed = run_lexer(&preprocessed)?;
@@ -95,6 +95,8 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
         };
         std::process::exit(0);
     } 
+
+    let mut symbols = HashMap::new();
 
     let mut parsed = run_parser(lexed)?;
     if args.parse {
@@ -108,7 +110,7 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
         std::process::exit(0);
     }
 
-    let var_map = run_semanal(&mut parsed)?;
+    let var_map = run_semanal(&mut parsed, &mut symbols)?;
     if args.validate {
         for function in parsed.functions {
             if function.body.is_some() {
@@ -131,17 +133,19 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
         std::process::exit(0);
     }
 
-    // let asm = run_codegen(poise);
-    // if args.codegen {
-    //     for item in asm.function.body {
-    //         println!("{:?}", item);
-    //     }
-    //     std::process::exit(0);
-    // }
+    let asm = run_codegen(poise);
+    if args.codegen {
+        for function in asm.functions {
+            for item in function.body {
+                println!("{:?}", item);
+            }
+        }
+        std::process::exit(0);
+    }
     
     let mut output_file = input_file.clone();
     output_file.set_extension("s");
-    // run_emitter(asm, &output_file)?;
+    run_emitter(asm, &mut symbols, &output_file)?;
     Ok(output_file.to_path_buf())
 }
 

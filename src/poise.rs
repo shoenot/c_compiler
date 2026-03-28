@@ -8,6 +8,7 @@ pub struct PoiseProg {
 #[derive(Debug)]
 pub struct PoiseFunc {
     pub identifier: String,
+    pub params: Vec<String>,
     pub body: Vec<PoiseInstruction>
 }
 
@@ -20,7 +21,8 @@ pub enum PoiseInstruction {
     Jump(String),
     JumpIfZero{condition: PoiseVal, identifier: String},
     JumpIfNotZero{condition: PoiseVal, identifier: String},
-    Label(String)
+    Label(String),
+    FunctionCall{ident: String, args: Vec<PoiseVal>, dst: PoiseVal}
 }
 
 #[derive(Debug, Clone)]
@@ -91,13 +93,13 @@ pub fn gen_poise(tree: &parser::Program) -> PoiseProg {
     PoiseProg { functions }
 }
 
-// FIX THIS
 fn gen_poisefunc(func: &parser::FuncDeclaration, count: &mut TmpCount) -> PoiseFunc {
     let mut instructions = Vec::new();
     let name = func.identifier.clone();
+    let params = func.params.clone();
     gen_inst_block(func.body.as_ref().unwrap(), &mut instructions, count);
     instructions.push(PoiseInstruction::Return(PoiseVal::Constant(0)));
-    PoiseFunc{ identifier: name, body: instructions }
+    PoiseFunc{ identifier: name, params, body: instructions }
 }
 
 fn gen_inst_block(block: &parser::Block, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount) {
@@ -105,7 +107,7 @@ fn gen_inst_block(block: &parser::Block, instructions: &mut Vec<PoiseInstruction
         match blockitem {
             parser::BlockItem::S(s) => gen_inst_statement(s, instructions, count),
             parser::BlockItem::D(parser::Decl::VarDecl(d)) => gen_inst_var_declaration(d, instructions, count),
-            _ => todo!()
+            parser::BlockItem::D(parser::Decl::FuncDecl(f)) => {},
         }
     }
 }
@@ -297,7 +299,18 @@ fn emit_expression(
             });
             tmp
         },
-        _ => todo!(),
+        parser::Expression::FunctionCall(ident, args) => {
+            let mut poiseargs = Vec::new();
+            let dst = count.new_var();
+            for arg in args {
+                let exp = emit_expression(arg, instructions, count);
+                let tmp = count.new_var();
+                instructions.push(PoiseInstruction::Copy { src: exp, dst: tmp.clone() });
+                poiseargs.push(tmp);
+            }
+            instructions.push(PoiseInstruction::FunctionCall { ident: ident.clone(), args: poiseargs, dst: dst.clone() });
+            dst
+        }
     }
 }
 

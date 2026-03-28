@@ -1,57 +1,52 @@
 use std::collections::HashMap;
 use super::*;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Type {
-    Int,
-    FuncType(usize),
-}
-
-pub fn type_checking_pass(program: &mut Program) -> Result<HashMap<String, (Type, Option<bool>)>, SemanticError> {
-    let mut symbols = HashMap::new();
+pub fn type_checking_pass(program: &mut Program, symbols: &mut HashMap<String, Symbol>) -> Result<(), SemanticError> {
     for function in &mut program.functions {
-        check_func_decl(function, &mut symbols)?;
+        check_func_decl(function, symbols)?;
     }
-    Ok(symbols)
+    Ok(())
 }
 
-fn check_func_decl(function: &mut FuncDeclaration, symbols: &mut HashMap<String, (Type, Option<bool>)>) 
+fn check_func_decl(function: &mut FuncDeclaration, symbols: &mut HashMap<String, Symbol>) 
     -> Result<(), SemanticError> {
     let func_type = Type::FuncType(function.params.len());
+    let name = function.identifier.clone();
     let has_body = function.body.is_some();
     let mut alr_def = false;
 
-    if let Some((old_type, Some(old_alr_def))) = symbols.get(&function.identifier) {
-        if *old_type != func_type {
+    if let Some(old) = symbols.get(&function.identifier) {
+        if old.datatype != func_type {
             return Err(SemanticError::IncompatibleFuncDeclaration(function.identifier.clone()));
         } 
-        alr_def = *old_alr_def;
+        alr_def = old.linkage.unwrap();
         if alr_def && has_body {
             return Err(SemanticError::DoubleDeclaration(function.identifier.clone()));
         }
     }
 
-    symbols.insert(function.identifier.clone(), (func_type, Some(alr_def || has_body)));
+    symbols.insert(name.clone(), Symbol::new_func(name.clone(), func_type, alr_def || has_body));
 
     if has_body {
         for parameter in &mut function.params {
-            symbols.insert(parameter.clone(), (Type::Int, None));
+            symbols.insert(parameter.clone(), Symbol::new_var(parameter.clone(), Type::Int));
         }
         check_block(function.body.as_mut().unwrap(), symbols)?;
     }
     Ok(())
 }
 
-fn check_var_decl(variable: &mut VarDeclaration, symbols: &mut HashMap<String, (Type, Option<bool>)>) 
+fn check_var_decl(variable: &mut VarDeclaration, symbols: &mut HashMap<String, Symbol>) 
     -> Result<(), SemanticError> {
-    symbols.insert(variable.identifier.clone(), (Type::Int, None));
+    let name = variable.identifier.clone();
+    symbols.insert(name.clone(), Symbol::new_var(name, Type::Int));
     if let Some(init) = &mut variable.init {
         check_expression(init, symbols)?;
     }
     Ok(())
 }
 
-fn check_block(block: &mut Block, symbols: &mut HashMap<String, (Type, Option<bool>)>)
+fn check_block(block: &mut Block, symbols: &mut HashMap<String, Symbol>)
     -> Result<(), SemanticError> {
     for item in &mut block.items {
         match item {
@@ -63,7 +58,7 @@ fn check_block(block: &mut Block, symbols: &mut HashMap<String, (Type, Option<bo
     Ok(())
 }
 
-fn check_statement(statement: &mut Statement, symbols: &mut HashMap<String, (Type, Option<bool>)>)
+fn check_statement(statement: &mut Statement, symbols: &mut HashMap<String, Symbol>)
     -> Result<(), SemanticError> {
     match statement {
         Statement::Return(exp) | Statement::Expression(exp) => {
@@ -112,16 +107,18 @@ fn check_statement(statement: &mut Statement, symbols: &mut HashMap<String, (Typ
     Ok(())
 }
 
-fn check_expression(expression: &mut Expression, symbols: &mut HashMap<String, (Type, Option<bool>)>)
+fn check_expression(expression: &mut Expression, symbols: &mut HashMap<String, Symbol>)
     -> Result<(), SemanticError> {
     match expression {
         Expression::FunctionCall(identifier, args) => {
-            if let Some((Type::FuncType(n), _)) = symbols.get(identifier) {
-                if *n != args.len() {
-                    return Err(SemanticError::FuncCalledWithWrongNumArgs(identifier.clone()));
-                } else {
-                    for arg in args {
-                        check_expression(arg, symbols)?;
+            if let Some(sym) = symbols.get(identifier) {
+                if let Type::FuncType(n) = sym.datatype {
+                    if n != args.len() {
+                        return Err(SemanticError::FuncCalledWithWrongNumArgs(identifier.clone()));
+                    } else {
+                        for arg in args {
+                            check_expression(arg, symbols)?;
+                        }
                     }
                 }
             } else {
@@ -129,10 +126,10 @@ fn check_expression(expression: &mut Expression, symbols: &mut HashMap<String, (
             }
         },
         Expression::Var(identifier) => {
-            if let Some((vartype, opt)) = symbols.get(identifier) {
-                if *vartype != Type::Int {
+            if let Some(sym) = symbols.get(identifier) {
+                if sym.datatype != Type::Int {
                     return Err(SemanticError::FuncUsedAsVar(identifier.clone()));
-                } else if *opt != None {
+                } else if sym.linkage != None {
                     return Err(SemanticError::FuncUsedAsVar(identifier.clone()));
                 }
             }

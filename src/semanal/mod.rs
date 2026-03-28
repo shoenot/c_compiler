@@ -57,11 +57,41 @@ impl fmt::Display for SemanticError {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Type {
+    Int,
+    FuncType(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Symbol {
+    pub ident: String,
+    pub datatype: Type,
+    pub linkage: Option<bool>,
+    pub stack_size: Option<i32>,
+}
+
+impl Symbol {
+    fn new_func(ident: String, ftype: Type, linkage: bool) -> Symbol {
+        Symbol {
+            ident: ident,
+            datatype: ftype,
+            linkage: Some(linkage),
+            stack_size: None,
+        }
+    }
+
+    fn new_var(ident: String, vtype: Type) -> Symbol {
+        Symbol { ident, datatype: vtype, linkage: None, stack_size: None }
+    }
+}
+
 impl std::error::Error for SemanticError {}
 
-pub fn semantic_analysis(program: &mut Program) -> Result<HashMap<String, (String, usize, bool)>, SemanticError> {
+pub fn semantic_analysis(program: &mut Program, symbols: &mut HashMap<String, Symbol>) 
+    -> Result<HashMap<String, (String, usize, bool)>,SemanticError> {
     let map = identifier_resolution_pass(program)?;
     label_generation_pass(program)?;
-    type_checking_pass(program)?;
+    type_checking_pass(program, symbols)?;
     Ok(map)
 }
