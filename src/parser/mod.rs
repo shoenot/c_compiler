@@ -92,6 +92,12 @@ impl Parser {
         }
     }
 
+    fn next_token_is_specifier(&mut self) -> bool {
+        self.peek().map_or(false, |token| {
+            matches!(token.token_type, TokenType::Int | TokenType::Static | TokenType::Extern)
+        })
+    }
+
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         let token = self.advance()?;
         match token.token_type {
@@ -110,7 +116,7 @@ impl Parser {
 
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut declarations = Vec::new();
-        while self.next_token_is(TokenType::Int) {
+        while self.next_token_is_specifier() {
             declarations.push(self.parse_declaration()?);
         }
         self.expect_eof()?;
@@ -232,9 +238,9 @@ impl Parser {
     }
 
     fn parse_blockitem(&mut self) -> Result<BlockItem, ParseError> {
-        let item = match self.next_token_type()? {
-            TokenType::Int => BlockItem::D(self.parse_declaration()?),
-            _ => BlockItem::S(self.parse_statement()?),
+        let item = match self.next_token_is_specifier() {
+            true => BlockItem::D(self.parse_declaration()?),
+            false => BlockItem::S(self.parse_statement()?),
         };
         Ok(item)
     }
@@ -377,22 +383,23 @@ impl Parser {
         self.advance()?;
         self.expect(TokenType::OpenParen)?;
         let init = match self.next_token_type()? {
-            TokenType::Int => {
-                let dec = match self.parse_declaration()? {
-                    Decl::VarDecl(v) => v,
-                    Decl::FuncDecl(_) => return Err(ParseError::ExpectedVarDecl(self.current_span)),
-                };
-                ForInit::InitDec(dec)
-            },
             TokenType::Semicolon => {
                 self.advance()?;
                 ForInit::InitExp(None)
             },
             _ => {
-                let exp = self.parse_expression(0)?;
-                self.expect(TokenType::Semicolon)?;
-                ForInit::InitExp(Some(exp))
-            }
+                if self.next_token_is_specifier() {
+                    let dec = match self.parse_declaration()? {
+                        Decl::VarDecl(v) => v,
+                        Decl::FuncDecl(_) => return Err(ParseError::ExpectedVarDecl(self.current_span)),
+                    };
+                    ForInit::InitDec(dec)
+                } else {
+                    let exp = self.parse_expression(0)?;
+                    self.expect(TokenType::Semicolon)?;
+                    ForInit::InitExp(Some(exp))
+                }
+            },
         };
 
         let mut cond = None;

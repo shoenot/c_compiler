@@ -35,7 +35,7 @@ pub struct VarDeclaration {
     pub storage: Option<StorageClass>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StorageClass {
     Static,
     Extern,

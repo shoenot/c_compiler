@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::codegen::{AsmProgram, gen_program};
 use crate::lexer::{Token, Tokenizer};
 use crate::parser::{Parser, Program};
-use crate::semanal::{semantic_analysis, Symbol};
+use crate::semanal::{semantic_analysis, Symbol, MapEntry};
 use crate::poise::{PoiseProg, gen_poise};
 use crate::emit::emit_program;
 
@@ -66,7 +66,7 @@ fn run_parser(tokens: Vec<Token>) -> Result<Program, Box<dyn Error>> {
     Ok(program)
 }
 
-fn run_semanal(program: &mut Program, symbols: &mut HashMap<String, Symbol>) -> Result<HashMap<String, (String, bool)>, Box<dyn Error>> {
+fn run_semanal(program: &mut Program, symbols: &mut HashMap<String, Symbol>) -> Result<HashMap<String, MapEntry>, Box<dyn Error>> {
     let var_map = semantic_analysis(program, symbols)?;
     Ok(var_map)
 }

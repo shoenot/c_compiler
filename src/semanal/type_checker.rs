@@ -2,6 +2,51 @@ use std::collections::HashMap;
 use super::*;
 use visitor_trait::*;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum IdentAttrs {
+    FuncAttr{defined: bool, global: bool},
+    StaticAttr{init: InitialValue, global: bool},
+    LocalAttr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InitialValue {
+    Tentative,
+    Initial(i32),
+    NoInitializer,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Symbol {
+    pub ident: String,
+    pub datatype: Type,
+    pub linkage: Option<bool>,
+    pub stack_size: Option<i32>,
+    pub attrs: IdentAttrs,
+}
+
+impl Symbol {
+    fn new_func(ident: String, ftype: Type, linkage: bool, defined: bool, global: bool) -> Symbol {
+        Symbol {
+            ident: ident,
+            datatype: ftype,
+            linkage: Some(linkage),
+            stack_size: None,
+            attrs: IdentAttrs::FuncAttr { defined, global }
+        }
+    }
+
+    fn new_static_var(ident: String, vtype: Type, init: InitialValue, global: bool) -> Symbol {
+        Symbol { ident, datatype: vtype, linkage: None, stack_size: None, 
+            attrs: IdentAttrs::StaticAttr { init, global } }
+    }
+    
+    fn new_var(ident: String, vtype: Type) -> Symbol {
+        Symbol { ident, datatype: vtype, linkage: None, stack_size: None, attrs: IdentAttrs::LocalAttr }
+    }
+}
+
+
 struct TypeChecker<'a> {
     symbols: &'a mut HashMap<String, Symbol>
 }

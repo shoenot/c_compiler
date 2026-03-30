@@ -5,17 +5,20 @@ use crate::parser::*;
 
 mod visitor_trait;
 
-mod identifier_resolver;
-use identifier_resolver::identifier_resolution_pass;
+mod id_resolver;
+pub use id_resolver::*;
 
 mod switch_collector;
-use switch_collector::switch_collection_pass;
+use switch_collector::*;
 
 mod loop_labeler;
-use loop_labeler::loop_labeling_pass;
+use loop_labeler::*;
 
 mod type_checker;
-use type_checker::type_checking_pass;
+pub use type_checker::*;
+
+mod label_mangler;
+use label_mangler::*;
 
 #[derive(Debug)]
 pub enum SemanticError {
@@ -62,34 +65,12 @@ impl fmt::Display for SemanticError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Symbol {
-    pub ident: String,
-    pub datatype: Type,
-    pub linkage: Option<bool>,
-    pub stack_size: Option<i32>,
-}
-
-impl Symbol {
-    fn new_func(ident: String, ftype: Type, linkage: bool) -> Symbol {
-        Symbol {
-            ident: ident,
-            datatype: ftype,
-            linkage: Some(linkage),
-            stack_size: None,
-        }
-    }
-
-    fn new_var(ident: String, vtype: Type) -> Symbol {
-        Symbol { ident, datatype: vtype, linkage: None, stack_size: None }
-    }
-}
-
 impl std::error::Error for SemanticError {}
 
 pub fn semantic_analysis(program: &mut Program, symbols: &mut HashMap<String, Symbol>) 
-    -> Result<HashMap<String, (String, bool)>,SemanticError> {
+    -> Result<HashMap<String, MapEntry>, SemanticError> {
     let map = identifier_resolution_pass(program)?;
+    label_mangling_pass(program)?;
     loop_labeling_pass(program)?;
     switch_collection_pass(program)?;
     type_checking_pass(program, symbols)?;
