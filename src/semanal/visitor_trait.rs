@@ -70,23 +70,23 @@ pub fn walk_func_decl<V: Visitor + ?Sized>(v: &mut V, func: &mut FuncDeclaration
 }
 
 pub fn walk_statement<V: Visitor + ?Sized>(v: &mut V, statement: &mut Statement) -> Result<(), SemanticError> {
-    match statement {
-        Statement::Return(exp) | Statement::Expression(exp) |
-        Statement::Case { expr: exp, lab:_ } => {
+    match &mut statement.kind {
+        StatementKind::Return(exp) | StatementKind::Expression(exp) |
+        StatementKind::Case { expr: exp, lab:_ } => {
             v.visit_expression(exp)?;
         },
-        Statement::If(exp, y, mn) => {
+        StatementKind::If(exp, y, mn) => {
             v.visit_expression(exp)?;
             v.visit_statement(y)?;
             if let Some(n) = mn {
                 v.visit_statement(n)?;
             }
         },
-        Statement::While { cond, body, lab:_ } | Statement::DoWhile { body, cond, lab:_ } => {
+        StatementKind::While { cond, body, lab:_ } | StatementKind::DoWhile { body, cond, lab:_ } => {
             v.visit_expression(cond)?;
             v.visit_statement(body)?;
         },
-        Statement::For { init, cond, post, body, lab:_ } => {
+        StatementKind::For { init, cond, post, body, lab:_ } => {
             match init {
                 ForInit::InitDec(d) => v.visit_var_decl(d)?,
                 ForInit::InitExp(Some(e)) => v.visit_expression(e)?,
@@ -100,8 +100,8 @@ pub fn walk_statement<V: Visitor + ?Sized>(v: &mut V, statement: &mut Statement)
             }
             v.visit_statement(body)?;
         },
-        Statement::Label(_, s) => v.visit_statement(s)?,
-        Statement::Switch { scrutinee, body, lab:_, cases } => {
+        StatementKind::Label(_, s) => v.visit_statement(s)?,
+        StatementKind::Switch { scrutinee, body, lab:_, cases } => {
             v.visit_expression(scrutinee)?;
             v.visit_statement(body)?;
             for c in cases {
@@ -110,36 +110,36 @@ pub fn walk_statement<V: Visitor + ?Sized>(v: &mut V, statement: &mut Statement)
                 }
             }
         },
-        Statement::Compound(blk) => v.visit_block(blk)?,
+        StatementKind::Compound(blk) => v.visit_block(blk)?,
         _ => {}
     }
     Ok(())
 }
 
 pub fn walk_expression<V: Visitor + ?Sized>(v: &mut V, expression: &mut Expression) -> Result<(), SemanticError> {
-    match expression {
-        Expression::Assignment(exp1, exp2) |
-        Expression::Binary(_, exp1, exp2) => {
+    match &mut expression.kind {
+        ExpressionKind::Assignment(exp1, exp2) |
+        ExpressionKind::Binary(_, exp1, exp2) => {
             v.visit_expression(exp1.as_mut())?;
             v.visit_expression(exp2.as_mut())?;
         },
-        Expression::Conditional(exp1, exp2, exp3) => {
+        ExpressionKind::Conditional(exp1, exp2, exp3) => {
             v.visit_expression(exp1.as_mut())?;
             v.visit_expression(exp2.as_mut())?;
             v.visit_expression(exp3.as_mut())?;
         },
-        Expression::Unary(_, exp) |
-        Expression::PostfixIncrement(exp) | Expression::PrefixIncrement(exp) | 
-        Expression::PostfixDecrement(exp) | Expression::PrefixDecrement(exp) => {
+        ExpressionKind::Unary(_, exp) |
+        ExpressionKind::PostfixIncrement(exp) | ExpressionKind::PrefixIncrement(exp) | 
+        ExpressionKind::PostfixDecrement(exp) | ExpressionKind::PrefixDecrement(exp) => {
             v.visit_expression(exp.as_mut())?;
         },
-        Expression::FunctionCall(_, args) => {
+        ExpressionKind::FunctionCall(_, args) => {
             for exp in args {
                 v.visit_expression(exp)?;
             }
         },
-        Expression::Var(_) |
-        Expression::Constant(_) => {},
+        ExpressionKind::Var(_) |
+        ExpressionKind::Constant(_) => {},
     }
     Ok(())
 }

@@ -115,6 +115,14 @@ impl Parser {
         }
     }
 
+    fn new_expr(&self, kind: ExpressionKind) -> Expression {
+        Expression::new(kind, self.current_span)
+    }
+
+    fn new_stmt(&self, kind: StatementKind) -> Statement {
+        Statement::new(kind, self.current_span)
+    }
+
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut declarations = Vec::new();
         while self.next_token_is_specifier() {
@@ -177,7 +185,7 @@ impl Parser {
         } else {
             self.expect(TokenType::Semicolon)?;
         }
-        Ok(FuncDeclaration { identifier, params, body, storage }) 
+        Ok(FuncDeclaration { identifier, params, body, storage, span: self.current_span }) 
     }
 
     fn parse_func_params(&mut self) -> Result<Vec<String>, ParseError> {
@@ -221,7 +229,7 @@ impl Parser {
             init = Some(self.parse_expression(0)?);
         }
         self.expect(TokenType::Semicolon)?;
-        Ok(VarDeclaration{identifier, init, storage})
+        Ok(VarDeclaration{identifier, init, storage, span: self.current_span})
     }
 
     //////////////
@@ -253,15 +261,15 @@ impl Parser {
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         let statement = match self.next_token_type()? {
             TokenType::Semicolon => { 
-                let ret = Statement::Null;
+                let ret = StatementKind::Null;
                 self.expect(TokenType::Semicolon)?;
-                ret
+                self.new_stmt(ret)
             },
             TokenType::Return => {
                 self.advance()?;
-                let ret = Statement::Return(self.parse_expression(0)?);
+                let ret = StatementKind::Return(self.parse_expression(0)?);
                 self.expect(TokenType::Semicolon)?;
-                ret 
+                self.new_stmt(ret)
             },
             TokenType::If => {
                 self.advance()?;
@@ -272,9 +280,9 @@ impl Parser {
                 if self.next_token_is(TokenType::Else) { 
                     self.advance()?;
                     let no = self.parse_statement()?;
-                    Statement::If(cond, Box::new(yes), Some(Box::new(no)))
+                    self.new_stmt(StatementKind::If(cond, Box::new(yes), Some(Box::new(no))))
                 } else {
-                    Statement::If(cond, Box::new(yes), None)
+                    self.new_stmt(StatementKind::If(cond, Box::new(yes), None))
                 }
             },
             TokenType::Identifier(name) => {
@@ -291,18 +299,18 @@ impl Parser {
                             _ => return Err(e),
                         }
                     };
-                    Statement::Label(name, Box::new(body))
+                    self.new_stmt(StatementKind::Label(name, Box::new(body)))
                 } else if self.next_token_is(TokenType::OpenParen) {
                     let mut expr = self.parse_factor(Some(tok))?;
                     expr = self.parse_expression_cont(expr, 0)?;
                     self.expect(TokenType::Semicolon)?;
-                    Statement::Expression(expr)
+                    self.new_stmt(StatementKind::Expression(expr))
                 } else {
-                    let mut expr = Expression::Var(name);
+                    let mut expr = self.new_expr(ExpressionKind::Var(name));
                     expr = self.check_postfix(expr)?;
                     expr = self.parse_expression_cont(expr, 0)?;
                     self.expect(TokenType::Semicolon)?;
-                    Statement::Expression(expr)
+                    self.new_stmt(StatementKind::Expression(expr))
                 }
             },
             TokenType::Goto => {
@@ -311,14 +319,14 @@ impl Parser {
                 match token.token_type {
                     TokenType::Identifier(name) => {
                         self.expect(TokenType::Semicolon)?;
-                        Statement::Goto(name)
+                        self.new_stmt(StatementKind::Goto(name))
                     },
                     _ => return Err(ParseError::ExpectedIdentifier(self.current_span))
                 }
             },
             TokenType::OpenBrace => {
                 let block = self.parse_block()?;
-                Statement::Compound(block)
+                self.new_stmt(StatementKind::Compound(block))
             },
             TokenType::While => {
                 self.advance()?;
@@ -326,7 +334,7 @@ impl Parser {
                 let cond = self.parse_expression(0)?;
                 self.expect(TokenType::CloseParen)?;
                 let body = Box::new(self.parse_statement()?);
-                Statement::While { cond, body, lab: "".into() }
+                self.new_stmt(StatementKind::While { cond, body, lab: "".into() })
             },
             TokenType::Do => {
                 self.advance()?;
@@ -336,20 +344,20 @@ impl Parser {
                 let cond = self.parse_expression(0)?;
                 self.expect(TokenType::CloseParen)?;
                 self.expect(TokenType::Semicolon)?;
-                Statement::DoWhile { cond, body, lab: "".into() }
+                self.new_stmt(StatementKind::DoWhile { cond, body, lab: "".into() })
             },
             TokenType::For => self.parse_for_loop()?,
             TokenType::Break => {
                 self.advance()?;
-                let ret = Statement::Break("".into());
+                let ret = StatementKind::Break("".into());
                 self.expect(TokenType::Semicolon)?;
-                ret
+                self.new_stmt(ret)
             },
             TokenType::Continue => {
                 self.advance()?;
-                let ret = Statement::Continue("".into());
+                let ret = StatementKind::Continue("".into());
                 self.expect(TokenType::Semicolon)?;
-                ret
+                self.new_stmt(ret)
             },
             TokenType::Switch => {
                 self.advance()?;
@@ -357,24 +365,24 @@ impl Parser {
                 let scrutinee = self.parse_expression(0)?;
                 self.expect(TokenType::CloseParen)?;
                 let body = self.parse_statement()?;
-                Statement::Switch{ scrutinee, body: Box::new(body), lab:"".into(), cases: Vec::new() }
+                self.new_stmt(StatementKind::Switch{ scrutinee, body: Box::new(body), lab:"".into(), cases: Vec::new() })
             },
             TokenType::Case => {
                 self.advance()?;
                 let expr = self.parse_expression(0)?;
                 self.expect(TokenType::Colon)?;
-                Statement::Case{ expr, lab:"".into() }
+                self.new_stmt(StatementKind::Case{ expr, lab:"".into() })
             },
             TokenType::Default => {
                 self.advance()?;
                 self.expect(TokenType::Colon)?;
-                Statement::Default{lab:"".into()}
+                self.new_stmt(StatementKind::Default{lab:"".into()})
             },
             TokenType::Int => return Err(ParseError::ExpectedStatement(self.current_span)),
             _ => {
-                let ret = Statement::Expression(self.parse_expression(0)?);
+                let ret = StatementKind::Expression(self.parse_expression(0)?);
                 self.expect(TokenType::Semicolon)?;
-                ret
+                self.new_stmt(ret)
             },
         };
         Ok(statement)
@@ -417,7 +425,7 @@ impl Parser {
 
         let body = Box::new(self.parse_statement()?);
 
-        Ok(Statement::For { init, cond, post, body, lab: "".into() })
+        Ok(self.new_stmt(StatementKind::For { init, cond, post, body, lab: "".into() }))
     }
 
     ///////////////////
@@ -438,21 +446,21 @@ impl Parser {
             match op {
                 BinaryOp::Set => {
                     let right = self.parse_expression(prec)?;
-                    left = Expression::Assignment(Box::new(left), Box::new(right));
+                    left = self.new_expr(ExpressionKind::Assignment(Box::new(left), Box::new(right)));
                 }
                 BinaryOp::OpSet(op) => {
                     let right = self.parse_expression(prec)?;
-                    let binary = Expression::Binary(*op, Box::new(left.clone()), Box::new(right));
-                    left = Expression::Assignment(Box::new(left), Box::new(binary));
+                    let binary = self.new_expr(ExpressionKind::Binary(*op, Box::new(left.clone()), Box::new(right)));
+                    left = self.new_expr(ExpressionKind::Assignment(Box::new(left), Box::new(binary)));
                 }
                 BinaryOp::Ternary => {
                     let middle = self.parse_conditional_middle()?;
                     let right = self.parse_expression(prec)?;
-                    left = Expression::Conditional(Box::new(left), Box::new(middle), Box::new(right));
+                    left = self.new_expr(ExpressionKind::Conditional(Box::new(left), Box::new(middle), Box::new(right)));
                 },
                 _ => {
                     let right = self.parse_expression(prec + 1)?;
-                    left = Expression::Binary(op, Box::new(left), Box::new(right));
+                    left = self.new_expr(ExpressionKind::Binary(op, Box::new(left), Box::new(right)));
                 }
             }
         }
@@ -472,7 +480,7 @@ impl Parser {
             None => self.advance()?,
         };
         let expr = match current_token.token_type {
-            TokenType::Constant(value) => Expression::Constant(value),
+            TokenType::Constant(value) => self.new_expr(ExpressionKind::Constant(value)),
             TokenType::OpenParen => {
                 let expression = self.parse_expression(0)?;
                 self.expect(TokenType::CloseParen)?;
@@ -484,18 +492,18 @@ impl Parser {
             TokenType::Identifier(name) => {
                 if self.next_token_is(TokenType::OpenParen) {
                     let args = self.parse_func_args()?;
-                    Expression::FunctionCall(name, args)
+                    self.new_expr(ExpressionKind::FunctionCall(name, args))
                 } else {
-                    Expression::Var(name)
+                    self.new_expr(ExpressionKind::Var(name))
                 }
             },
             TokenType::DoublePlus => {
                 let operand = self.parse_factor(None)?;
-                Expression::PrefixIncrement(Box::new(operand))
+                self.new_expr(ExpressionKind::PrefixIncrement(Box::new(operand)))
             },
             TokenType::DoubleMinus => {
                 let operand = self.parse_factor(None)?;
-                Expression::PrefixDecrement(Box::new(operand))
+                self.new_expr(ExpressionKind::PrefixDecrement(Box::new(operand)))
             },
             _ => return Err(ParseError::ExpectedExpression(self.current_span)),
         };
@@ -527,11 +535,11 @@ impl Parser {
             match self.next_token_type()? {
                 TokenType::DoublePlus => {
                     self.advance()?;
-                    expr = Expression::PostfixIncrement(Box::new(expr.clone()));
+                    expr = self.new_expr(ExpressionKind::PostfixIncrement(Box::new(expr.clone())));
                 },
                 TokenType::DoubleMinus => {
                     self.advance()?;
-                    expr = Expression::PostfixDecrement(Box::new(expr.clone()));
+                    expr = self.new_expr(ExpressionKind::PostfixDecrement(Box::new(expr.clone())));
                 },
                 _ => return Ok(expr),
             }
@@ -540,7 +548,7 @@ impl Parser {
 
     fn parse_unop(&mut self, op: UnaryOp) -> Result<Expression, ParseError> {
         let operand = self.parse_factor(None)?;
-        Ok(Expression::Unary(op, Box::new(operand)))
+        Ok(self.new_expr(ExpressionKind::Unary(op, Box::new(operand))))
     }
 
     fn peek_binop(&mut self) -> Result<Option<BinaryOp>, ParseError> {

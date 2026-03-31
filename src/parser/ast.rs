@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use crate::lexer::Span;
 
 #[derive(Debug)]
@@ -6,36 +6,57 @@ pub struct Program {
     pub declarations: Vec<Decl>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub items: Vec<BlockItem>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockItem {
     S(Statement),
     D(Decl),
 }
 
-#[derive(Debug)]
+/// Declarations
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     VarDecl(VarDeclaration),
     FuncDecl(FuncDeclaration),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncDeclaration {
     pub identifier: String,
     pub params: Vec<String>,
     pub body: Option<Block>,
     pub storage: Option<StorageClass>,
+    pub span: Span,
 }
 
-#[derive(Debug)]
+impl PartialEq for FuncDeclaration {
+    fn eq(&self, other: &Self) -> bool {
+        self.identifier == other.identifier &&
+        self.params == other.params &&
+        self.body == other.body &&
+        self.storage == other.storage 
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct VarDeclaration {
     pub identifier: String,
     pub init: Option<Expression>,
     pub storage: Option<StorageClass>,
+    pub span: Span,
+}
+
+impl PartialEq for VarDeclaration {
+    fn eq(&self, other: &Self) -> bool {
+        self.identifier == other.identifier &&
+        self.init == other.init &&
+        self.storage == other.storage 
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,14 +65,38 @@ pub enum StorageClass {
     Extern,
 }
 
-// For loop initiator
-#[derive(Debug)]
-pub enum ForInit {
-    InitDec(VarDeclaration),
-    InitExp(Option<Expression>),
+pub trait HasStorage {
+    fn storage_class(&self) -> Option<StorageClass>;
 }
-#[derive(Debug)]
-pub enum Statement {
+
+impl HasStorage for VarDeclaration {
+    fn storage_class(&self) -> Option<StorageClass> {
+        self.storage.clone()
+    }
+}
+
+impl HasStorage for FuncDeclaration {
+    fn storage_class(&self) -> Option<StorageClass> {
+        self.storage.clone()
+    }
+}
+
+/// Statements
+
+#[derive(Debug, Clone)]
+pub struct Statement {
+    pub kind: StatementKind,
+    pub span: Span,
+}
+
+impl PartialEq for Statement {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind 
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatementKind {
     Return(Expression),
     Expression(Expression),
     If(Expression, Box<Statement>, Option<Box<Statement>>), // Else statements not mandatory. 
@@ -69,9 +114,48 @@ pub enum Statement {
     Null,
 }
 
+impl Deref for Statement {
+    type Target = StatementKind;
+
+    fn deref(&self) -> &Self::Target {
+        &self.kind
+    }
+}
+
+impl DerefMut for Statement {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.kind
+    }
+}
+
+impl Statement {
+    pub fn new(kind: StatementKind, span: Span) -> Self {
+        Statement{kind, span}
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
+pub enum ForInit {
+    InitDec(VarDeclaration),
+    InitExp(Option<Expression>),
+}
+
+/// Expressions
+
+#[derive(Debug, Clone)]
+pub struct Expression {
+    pub kind: ExpressionKind,
+    pub span: Span,
+}
+
+impl PartialEq for Expression {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind 
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExpressionKind {
     Constant(i32),
     Var(String),
     Assignment(Box<Expression>, Box<Expression>),
@@ -84,6 +168,28 @@ pub enum Expression {
     PostfixDecrement(Box<Expression>),
     FunctionCall(String, Vec<Expression>),
 }
+
+impl Deref for Expression {
+    type Target = ExpressionKind;
+
+    fn deref(&self) -> &Self::Target {
+        &self.kind
+    }
+}
+
+impl DerefMut for Expression {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.kind
+    }
+}
+
+impl Expression {
+    pub fn new(kind: ExpressionKind, span: Span) -> Self {
+        Expression{kind, span}
+    }
+}
+
+/// Operators
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
@@ -115,21 +221,5 @@ pub enum BinaryOp {
     Set,
     OpSet(Box<BinaryOp>),
     Ternary,
-}
-
-pub trait HasStorage {
-    fn storage_class(&self) -> Option<StorageClass>;
-}
-
-impl HasStorage for VarDeclaration {
-    fn storage_class(&self) -> Option<StorageClass> {
-        self.storage.clone()
-    }
-}
-
-impl HasStorage for FuncDeclaration {
-    fn storage_class(&self) -> Option<StorageClass> {
-        self.storage.clone()
-    }
 }
 

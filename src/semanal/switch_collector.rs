@@ -6,26 +6,26 @@ struct SwitchCollector;
 
 impl Visitor for SwitchCollector {
     fn visit_statement(&mut self, statement: &mut Statement) -> Result<(), SemanticError> {
-        match statement {
-            Statement::Switch { cases, body, .. } => {
+        match &mut statement.kind {
+            StatementKind::Switch { cases, body, .. } => {
                 *cases = collect_switch_cases(body)?;
 
                 let mut seen = HashSet::new();
-                for (expr, _) in cases.iter() {
-                    if let Some(Expression::Constant(value)) = expr {
+                for expr in cases.iter().filter_map(|(opt, _)| opt.as_ref()) {
+                    if let ExpressionKind::Constant(value) = &expr.kind {
                         if !seen.insert(value) {
-                            return Err(SemanticError::DuplicateCase);
+                            return Err(SemanticError::DuplicateCase(statement.span));
                         }
                     }
                 }
 
                 let default_count = cases.iter().filter(|(expr, _)| expr.is_none()).count();
                 if default_count > 1 {
-                    return Err(SemanticError::DuplicateDefault);
+                    return Err(SemanticError::DuplicateDefault(statement.span));
                 }
 
-                if let Statement::Compound(block) = body.as_mut() {
-                    check_block_for_decs(block)?;
+                if let StatementKind::Compound(block) = &body.kind {
+                    check_block_for_decs(block.clone())?;
                 }
 
                 self.visit_statement(body)?;
@@ -40,34 +40,37 @@ fn collect_cases_in_block(items: &mut Vec<BlockItem>) -> Result<Vec<(Option<Expr
     let mut cases = Vec::new();
     for item in items.iter_mut() {
         match item {
-            BlockItem::S(Statement::Case { expr, lab }) => {
-                match eval_constant(&expr) {
-                    Some(value) => *expr = Expression::Constant(value),
-                    None => return Err(SemanticError::NonConstantCase),
-                }
-                cases.push((Some(expr.clone()), lab.clone()));
+            BlockItem::S(stmt) => match &mut stmt.kind {
+                StatementKind::Case { expr, lab } => {
+                    match eval_constant(expr) {
+                        Some(value) => **expr = ExpressionKind::Constant(value),
+                        None => return Err(SemanticError::NonConstantCase(expr.span)),
+                    }
+                    cases.push((Some(expr.clone()), lab.clone()));
+                },
+                StatementKind::Default { lab } => {
+                    cases.push((None, lab.clone()));
+                },
+                StatementKind::Compound(bl) => {
+                    cases.append(&mut collect_cases_in_block(&mut bl.items)?);
+                },
+                StatementKind::If(_, yes, no) => {
+                    cases.append(&mut collect_switch_cases(yes.as_mut())?);
+                    if let Some(no) = no {
+                        cases.append(&mut collect_switch_cases(no.as_mut())?);
+                    }
+                },
+                StatementKind::Label(_, body) => {
+                    cases.append(&mut collect_switch_cases(body.as_mut())?);
+                },
+                StatementKind::For { body, .. } |
+                StatementKind::While { body, .. } |
+                StatementKind::DoWhile { body, .. } => {
+                    cases.append(&mut collect_switch_cases(body.as_mut())?);
+                },
+                _ => {}, 
             },
-            BlockItem::S(Statement::Default { lab }) => {
-                cases.push((None, lab.clone()));
-            },
-            BlockItem::S(Statement::Compound(bl)) => {
-                cases.append(&mut collect_cases_in_block(&mut bl.items)?);
-            },
-            BlockItem::S(Statement::If(_, yes, no)) => {
-                cases.append(&mut collect_switch_cases(yes.as_mut())?);
-                if let Some(no) = no {
-                    cases.append(&mut collect_switch_cases(no.as_mut())?);
-                }
-            },
-            BlockItem::S(Statement::Label(_, body)) => {
-                cases.append(&mut collect_switch_cases(body.as_mut())?);
-            },
-            BlockItem::S(Statement::For { body, .. }) |
-            BlockItem::S(Statement::While { body, .. }) |
-            BlockItem::S(Statement::DoWhile { body, .. }) => {
-                cases.append(&mut collect_switch_cases(body.as_mut())?);
-            },
-            BlockItem::S(_) | BlockItem::D(_) => {},
+            BlockItem::D(_) => {},
         }
     }
     Ok(cases)
@@ -75,30 +78,32 @@ fn collect_cases_in_block(items: &mut Vec<BlockItem>) -> Result<Vec<(Option<Expr
 
 fn collect_switch_cases(st: &mut Statement) -> Result<Vec<(Option<Expression>, String)>, SemanticError> {
     let mut cases = Vec::new();
-    if let Statement::Compound(block) = st {
+    if let StatementKind::Compound(block) = &mut st.kind {
         cases.append(&mut collect_cases_in_block(&mut block.items)?);
-    } else if let Statement::Case { expr, lab } = st {
+    } else if let StatementKind::Case { expr, lab } = &mut st.kind {
         cases.push((Some(expr.clone()), lab.clone()));
-    } else if let Statement::Default { lab } = st {
+    } else if let StatementKind::Default { lab } = &mut st.kind {
         cases.push((None, lab.clone()));
     }
     Ok(cases)
 }
 
-fn check_block_for_decs(block: &mut Block) -> Result<(), SemanticError> {
+fn check_block_for_decs(block: Block) -> Result<(), SemanticError> {
     let items = &block.items;
     for window in items.windows(2) {
-        if let [BlockItem::S(Statement::Case { .. } | Statement::Default { .. }), BlockItem::D(_)] = window {
-            return Err(SemanticError::DecInCase);
+        if let [BlockItem::S(stmt), BlockItem::D(_)] = window {
+            if let StatementKind::Case{..} | StatementKind::Default{..} = stmt.kind {
+                return Err(SemanticError::DecInCase(stmt.span));
+            }
         }
     }
     Ok(())
 }
 
-fn eval_constant(expr: &Expression) -> Option<i32> {
+fn eval_constant(expr: &ExpressionKind) -> Option<i32> {
     match expr {
-        Expression::Constant(n) => Some(*n),
-        Expression::Unary(op, expr) => {
+        ExpressionKind::Constant(n) => Some(*n),
+        ExpressionKind::Unary(op, expr) => {
             let val = eval_constant(expr)?;
             match op {
                 UnaryOp::Negate => Some(-val),
@@ -106,7 +111,7 @@ fn eval_constant(expr: &Expression) -> Option<i32> {
                 UnaryOp::Not => Some((val == 0) as i32),
             }
         },
-        Expression::Binary(op, left, right) => {
+        ExpressionKind::Binary(op, left, right) => {
             let l = eval_constant(left)?;
             let r = eval_constant(right)?;
             match op {

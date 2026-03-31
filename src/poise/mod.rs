@@ -149,16 +149,16 @@ fn gen_inst_var_declaration(declaration: &parser::VarDeclaration, instructions: 
 }
 
 fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount, symbols: &SymbolTable) {
-    match statement {
-        parser::Statement::Return(expression) => {
+    match &statement.kind {
+        parser::StatementKind::Return(expression) => {
             let val = emit_expression(expression, instructions, count);
             instructions.push(PoiseInstruction::Return(val));
         }
-        parser::Statement::Expression(expression) => {
+        parser::StatementKind::Expression(expression) => {
             emit_expression(expression, instructions, count);
         }
-        parser::Statement::Null => return,
-        parser::Statement::If(c, y, n) => {
+        parser::StatementKind::Null => return,
+        parser::StatementKind::If(c, y, n) => {
             let cond = count.new_var();
             let eval = emit_expression(c, instructions, count);
             let no_label = count.new_label_string();
@@ -175,15 +175,15 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
                 instructions.push(PoiseInstruction::Label(no_label));
             }
         },
-        parser::Statement::Label(name, body) => {
+        parser::StatementKind::Label(name, body) => {
             instructions.push(PoiseInstruction::Label(name.clone()));
             gen_inst_statement(body, instructions, count, symbols);
         },
-        parser::Statement::Goto(name) => instructions.push(PoiseInstruction::Jump(name.clone())),
-        parser::Statement::Compound(block) => gen_inst_block(block, instructions, count, symbols),
-        parser::Statement::Break(lab) => instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "break"))),
-        parser::Statement::Continue(lab) => instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "cont"))),
-        parser::Statement::DoWhile { body, cond, lab } => {
+        parser::StatementKind::Goto(name) => instructions.push(PoiseInstruction::Jump(name.clone())),
+        parser::StatementKind::Compound(block) => gen_inst_block(block, instructions, count, symbols),
+        parser::StatementKind::Break(lab) => instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "break"))),
+        parser::StatementKind::Continue(lab) => instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "cont"))),
+        parser::StatementKind::DoWhile { body, cond, lab } => {
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "start")));
             gen_inst_statement(body, instructions, count, symbols);
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
@@ -192,7 +192,7 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
             
         },
-        parser::Statement::While { cond, body, lab }  => {
+        parser::StatementKind::While { cond, body, lab }  => {
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
             let res = emit_expression(cond, instructions, count);
             instructions.push(PoiseInstruction::JumpIfZero { condition: res, identifier: loop_label_string(lab.clone(), "break") });
@@ -201,7 +201,7 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
             
         },
-        parser::Statement::For { init, cond, post, body, lab } => {
+        parser::StatementKind::For { init, cond, post, body, lab } => {
             if let parser::ForInit::InitExp(Some(exp)) = init {
                 emit_expression(exp, instructions, count);
             } else if let parser::ForInit::InitDec(dec) = init {
@@ -220,7 +220,7 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
             instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "start")));
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
         },
-        parser::Statement::Switch { scrutinee, body, lab, cases } => {
+        parser::StatementKind::Switch { scrutinee, body, lab, cases } => {
             let scr = emit_expression(scrutinee, instructions, count);
             for case in cases.clone() {
                 if let (Some(value), clab) = case {
@@ -239,10 +239,10 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
             gen_inst_statement(body, instructions, count, symbols);
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
         },
-        parser::Statement::Case { lab,.. } => {
+        parser::StatementKind::Case { lab,.. } => {
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "case")));
         }, 
-        parser::Statement::Default { lab } => {
+        parser::StatementKind::Default { lab } => {
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "default")));
         },
     }
@@ -253,18 +253,18 @@ fn emit_expression(
     expr: &parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
     count: &mut TmpCount) -> PoiseVal {
-    match expr {
-        parser::Expression::Constant(val) => PoiseVal::Constant(*val),
-        parser::Expression::Unary(op, inner) => emit_un_exp(op, inner, instructions, count),
-        parser::Expression::Binary(op, exp1, exp2) => emit_bin_exp(op, exp1, exp2, instructions, count),
-        parser::Expression::Var(name) => PoiseVal::Variable(name.clone()),
-        parser::Expression::Assignment(lhs, rhs) => {
+    match &expr.kind {
+        parser::ExpressionKind::Constant(val) => PoiseVal::Constant(*val),
+        parser::ExpressionKind::Unary(op, inner) => emit_un_exp(op, inner, instructions, count),
+        parser::ExpressionKind::Binary(op, exp1, exp2) => emit_bin_exp(op, exp1, exp2, instructions, count),
+        parser::ExpressionKind::Var(name) => PoiseVal::Variable(name.clone()),
+        parser::ExpressionKind::Assignment(lhs, rhs) => {
             let result = emit_expression(rhs, instructions, count);
             let dest = emit_expression(lhs, instructions, count);
             instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
             dest
         },
-        parser::Expression::Conditional(c, y, n) => {
+        parser::ExpressionKind::Conditional(c, y, n) => {
             let cond = count.new_var();
             let eval = emit_expression(c, instructions, count);
             let no_label = count.new_label_string();
@@ -284,7 +284,7 @@ fn emit_expression(
             instructions.push(PoiseInstruction::Label(yes_label));
             dest
         },
-        parser::Expression::PrefixIncrement(e) => {
+        parser::ExpressionKind::PrefixIncrement(e) => {
             let var = emit_expression(e, instructions, count);
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Add,
@@ -294,7 +294,7 @@ fn emit_expression(
             });
             var
         },
-        parser::Expression::PrefixDecrement(e) => {
+        parser::ExpressionKind::PrefixDecrement(e) => {
             let var = emit_expression(e, instructions, count);
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Subtract,
@@ -304,7 +304,7 @@ fn emit_expression(
             });
             var
         },
-        parser::Expression::PostfixIncrement(e) => {
+        parser::ExpressionKind::PostfixIncrement(e) => {
             let var = emit_expression(e, instructions, count);
             let tmp = count.new_var();
             instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
@@ -316,7 +316,7 @@ fn emit_expression(
             });
             tmp
         },
-        parser::Expression::PostfixDecrement(e) => {
+        parser::ExpressionKind::PostfixDecrement(e) => {
             let var = emit_expression(e, instructions, count);
             let tmp = count.new_var();
             instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
@@ -328,7 +328,7 @@ fn emit_expression(
             });
             tmp
         },
-        parser::Expression::FunctionCall(ident, args) => {
+        parser::ExpressionKind::FunctionCall(ident, args) => {
             let mut poiseargs = Vec::new();
             let dst = count.new_var();
             for arg in args {

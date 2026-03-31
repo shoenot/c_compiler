@@ -14,10 +14,10 @@ impl LabelMangler {
         lab
     }
 
-    fn check_undeclared_label(&mut self) -> Result<(), SemanticError> {
+    fn check_undeclared_label(&mut self, span: Span) -> Result<(), SemanticError> {
         for (key, (_, status)) in &self.label_map {
             if !status {
-                return Err(SemanticError::UndeclaredLabel(key.clone()));
+                return Err(SemanticError::UndeclaredLabel(key.clone(), span));
             }
         }
         Ok(())
@@ -29,7 +29,7 @@ impl Visitor for LabelMangler {
         if let Decl::FuncDecl(f) = declaration {
             self.label_map = HashMap::new();
             self.visit_func_decl(f)?;
-            self.check_undeclared_label()?;
+            self.check_undeclared_label(f.span)?;
         } else {
             walk_declaration(self, declaration)?;
         }
@@ -37,13 +37,13 @@ impl Visitor for LabelMangler {
     }        
 
     fn visit_statement(&mut self, statement: &mut Statement) -> Result<(), SemanticError> {
-       match statement {
-           Statement::Label(name, st) => {
+       match &mut statement.kind {
+           StatementKind::Label(name, st) => {
                 let labelname = name.clone();
                 if let Some((mangled, status)) = self.label_map.get_mut(&labelname) {
                     let mangled = mangled.clone();
                     if *status {
-                        return Err(SemanticError::DuplicateLabel(mangled));
+                        return Err(SemanticError::DuplicateLabel(mangled, statement.span));
                     } else {
                         *status = true;
                         *name = mangled;
@@ -56,7 +56,7 @@ impl Visitor for LabelMangler {
                 self.visit_statement(st)?;
                 Ok(())
            },
-           Statement::Goto(name) => {
+           StatementKind::Goto(name) => {
                 let labelname = name.clone();
                 if self.label_map.contains_key(&labelname) {
                     let (newname, _) = self.label_map.get(&labelname).unwrap();

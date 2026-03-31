@@ -31,14 +31,19 @@ pub fn is_extern<T: HasStorage>(decl: &T) -> bool {
 
 impl<'a> TypeChecker<'a> {
     fn check_global_var(&mut self, decl: &mut VarDeclaration) -> Result<(), SemanticError> {
-        let mut initial_value = match decl.init {
-            Some(Expression::Constant(i)) => InitialValue::Initial(i),
+        let mut initial_value = match &decl.init {
+            Some(expr) => {
+                if let ExpressionKind::Constant(i) = expr.kind {
+                    InitialValue::Initial(i)
+                } else {
+                    return Err(SemanticError::NonConstantInitializer(decl.identifier.clone(), decl.span));
+                }
+            }
             None => if is_extern(decl) {
                 InitialValue::NoInitializer
             } else {
                 InitialValue::Tentative
             },
-            _ => return Err(SemanticError::NonConstantInitializer(decl.identifier.clone())),
         };
 
         let mut global = !is_static(decl);
@@ -46,18 +51,18 @@ impl<'a> TypeChecker<'a> {
         if let Some(old) = self.symbols.get(&decl.identifier) {
             if let IdentAttrs::StaticAttr { init: old_init, global: old_global } = &old.attrs {
                 if old.datatype != Type::Int {
-                    return Err(SemanticError::FuncUsedAsVar(decl.identifier.clone()));
+                    return Err(SemanticError::FuncUsedAsVar(decl.identifier.clone(), decl.span));
                 }
 
                 if is_extern(decl) {
                     global = *old_global;
                 } else if global != *old_global {
-                    return Err(SemanticError::ConflictingStorageTypes(decl.identifier.clone()));
+                    return Err(SemanticError::ConflictingStorageTypes(decl.identifier.clone(), decl.span));
                 }
 
                 if matches!(old_init, InitialValue::Initial(..)) {
                     if matches!(initial_value, InitialValue::Initial(..)) {
-                        return Err(SemanticError::ConflictingDefinitions(decl.identifier.clone()));
+                        return Err(SemanticError::ConflictingDefinitions(decl.identifier.clone(), decl.span));
                     } else {
                         initial_value = old_init.clone();
                     }
@@ -65,7 +70,7 @@ impl<'a> TypeChecker<'a> {
                     initial_value = InitialValue::Tentative;
                 }
             } else {
-                return Err(SemanticError::FuncUsedAsVar(decl.identifier.clone()));
+                return Err(SemanticError::FuncUsedAsVar(decl.identifier.clone(), decl.span));
             }
         }
         self.symbols.insert(decl.identifier.clone(),
@@ -87,19 +92,19 @@ impl<'a> Visitor for TypeChecker<'a> {
         if let Some(old) = self.symbols.get(&function.identifier) {
             if let IdentAttrs::FuncAttr { defined: olddef, global: oldglobal } = old.attrs {
                 if old.datatype != func_type {
-                    return Err(SemanticError::IncompatibleFuncDeclaration(function.identifier.clone()));
+                    return Err(SemanticError::IncompatibleFuncDeclaration(function.identifier.clone(), function.span));
                 }
                 alr_def = olddef;
                 if alr_def && has_body {
-                    return Err(SemanticError::DoubleDeclaration(function.identifier.clone()));
+                    return Err(SemanticError::DoubleDeclaration(function.identifier.clone(), function.span));
                 }
 
                 if oldglobal && function.storage == Some(StorageClass::Static) {
-                    return Err(SemanticError::StaticAfterNonStatic(function.identifier.clone()));
+                    return Err(SemanticError::StaticAfterNonStatic(function.identifier.clone(), function.span));
                 }
                 global = oldglobal;
             } else {
-                return Err(SemanticError::IncompatibleFuncDeclaration(function.identifier.clone()));
+                return Err(SemanticError::IncompatibleFuncDeclaration(function.identifier.clone(), function.span));
             }
         }
 
@@ -125,25 +130,27 @@ impl<'a> Visitor for TypeChecker<'a> {
 
         if is_extern(decl) {
             if decl.init != None {
-                return Err(SemanticError::InitializerOnLocalExtern(decl.identifier.clone()));
+                return Err(SemanticError::InitializerOnLocalExtern(decl.identifier.clone(), decl.span));
             }
             if let Some(old) = self.symbols.get(&decl.identifier) {
                 if old.datatype != Type::Int {
-                    return Err(SemanticError::FuncUsedAsVar(decl.identifier.clone()));
+                    return Err(SemanticError::FuncUsedAsVar(decl.identifier.clone(), decl.span));
                 }
             } else {
                 self.symbols.insert(decl.identifier.clone(),
                     Symbol::new_static_var(decl.identifier.clone(), Type::Int, InitialValue::NoInitializer, true));
             }
         } else if is_static(decl) {
-            let initial_value;
-            if let Some(Expression::Constant(i)) = decl.init {
-                initial_value = InitialValue::Initial(i);
-            } else if decl.init == None {
-                initial_value = InitialValue::Initial(0);
-            } else {
-                return Err(SemanticError::LocalStaticVarNonConstantInit(decl.identifier.clone()));
-            }
+            let initial_value = match &decl.init {
+                Some(expr) => {
+                    if let ExpressionKind::Constant(i) = expr.kind {
+                        InitialValue::Initial(i)
+                    } else {
+                        return Err(SemanticError::LocalStaticVarNonConstantInit(decl.identifier.clone(), expr.span));
+                    }
+                },
+                None => InitialValue::Initial(0)
+            };
             self.symbols.insert(decl.identifier.clone(),
                 Symbol::new_static_var(decl.identifier.clone(), Type::Int, initial_value, false));
         } else {
@@ -154,28 +161,28 @@ impl<'a> Visitor for TypeChecker<'a> {
     }
 
     fn visit_expression(&mut self, expression: &mut Expression) -> Result<(), SemanticError> {
-        match expression {
-            Expression::FunctionCall(identifier, args) => {
+        match &mut expression.kind {
+            ExpressionKind::FunctionCall(identifier, args) => {
                 if let Some(sym) = self.symbols.get(identifier) {
                     if let Type::FuncType(n) = sym.datatype {
                         if n != args.len() {
-                            return Err(SemanticError::FuncCalledWithWrongNumArgs(identifier.clone()));
+                            return Err(SemanticError::FuncCalledWithWrongNumArgs(identifier.clone(), expression.span));
                         }
                     } else {
-                        return Err(SemanticError::VarCalledAsFunc(identifier.clone()));
+                        return Err(SemanticError::VarCalledAsFunc(identifier.clone(), expression.span));
                     }
                 }
             },
-            Expression::Var(identifier) => {
+            ExpressionKind::Var(identifier) => {
                 if let Some(sym) = self.symbols.get(identifier) {
                     if matches!(sym.attrs, IdentAttrs::FuncAttr { .. }) {
-                        return Err(SemanticError::FuncUsedAsVar(identifier.clone()));
+                        return Err(SemanticError::FuncUsedAsVar(identifier.clone(), expression.span));
                     }
                 }
             },
-            Expression::Assignment(exp1, _) => {
-                if let Expression::FunctionCall(ident, _) = exp1.as_ref() {
-                    return Err(SemanticError::FuncUsedAsVar(ident.clone()));
+            ExpressionKind::Assignment(exp1, _) => {
+                if let ExpressionKind::FunctionCall(ident, _) = &**exp1.as_ref() {
+                    return Err(SemanticError::FuncUsedAsVar(ident.clone(), expression.span));
                 }
             },
             _ => {}

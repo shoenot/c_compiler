@@ -18,10 +18,10 @@ impl LoopLabeler {
 
 impl Visitor for LoopLabeler {
     fn visit_statement(&mut self, statement: &mut Statement) -> Result<(), SemanticError> {
-        match statement {
-            Statement::DoWhile { body, cond:_, lab } |
-            Statement::While { cond:_, body, lab } |
-            Statement::For { init:_, cond:_, post:_, body, lab } => {
+        match &mut statement.kind {
+            StatementKind::DoWhile { body, cond:_, lab } |
+            StatementKind::While { cond:_, body, lab } |
+            StatementKind::For { init:_, cond:_, post:_, body, lab } => {
                 let newlab = self.genlabel();
                 *lab = newlab.clone();
                 self.stack.push(newlab.clone());
@@ -30,33 +30,33 @@ impl Visitor for LoopLabeler {
                 self.loopstack.pop();
                 self.stack.pop();
             },
-            Statement::Break(lab) => {
+            StatementKind::Break(lab) => {
                 if let Some(newlab) = self.stack.last() {
                     *lab = newlab.into();
                 } else {
-                    return Err(SemanticError::BreakOutsideLoopOrSwitch);
+                    return Err(SemanticError::BreakOutsideLoopOrSwitch(statement.span));
                 }
             },
-            Statement::Continue(lab) => {
+            StatementKind::Continue(lab) => {
                 if let Some(newlab) = self.loopstack.last() {
                     *lab = newlab.into();
                 } else {
-                    return Err(SemanticError::ContOutsideLoop);
+                    return Err(SemanticError::ContOutsideLoop(statement.span));
                 }
             },
-            Statement::Compound(block) => {
+            StatementKind::Compound(block) => {
                 self.visit_block(block)?;
             },
-            Statement::Label(_, body) => {
+            StatementKind::Label(_, body) => {
                 self.visit_statement(body)?;
             }
-            Statement::If(_, yes, no) => {
+            StatementKind::If(_, yes, no) => {
                 self.visit_statement(yes)?;
                 if let Some(no) = no {
                     self.visit_statement(no)?;
                 }
             },
-            Statement::Switch { scrutinee:_, body, lab, cases:_ } => {
+            StatementKind::Switch { scrutinee:_, body, lab, cases:_ } => {
                 let newlab = self.genlabel();
                 *lab = newlab.clone();
                 self.stack.push(newlab.clone());
@@ -65,15 +65,15 @@ impl Visitor for LoopLabeler {
                 self.switchstack.pop();
                 self.stack.pop();
             },
-            Statement::Case { expr:_, lab } => {
+            StatementKind::Case { expr:_, lab } => {
                 if self.switchstack.is_empty() {
-                    return Err(SemanticError::CaseOutsideSwitch);
+                    return Err(SemanticError::CaseOutsideSwitch(statement.span));
                 }
                 *lab = self.genlabel();
             },
-            Statement::Default { lab } => {
+            StatementKind::Default { lab } => {
                 if self.switchstack.is_empty() {
-                    return Err(SemanticError::CaseOutsideSwitch);
+                    return Err(SemanticError::CaseOutsideSwitch(statement.span));
                 }
                 *lab = self.genlabel();
             },

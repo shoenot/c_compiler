@@ -27,6 +27,12 @@ pub struct Span {
     pub col: usize,
 }
 
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "line {}, col {}", self.line_number, self.col)
+    }
+}
+
 #[derive(Debug)]
 pub struct Token {
     pub token_type: TokenType,
@@ -69,7 +75,8 @@ impl Tokenizer {
         }
     }
 
-    fn at_end(&self) -> bool { self.current >= self.len
+    fn at_end(&self) -> bool { 
+        self.current >= self.len
     }
 
     fn is_double_char(&mut self, nextchar: char, no: TokenType, yes: TokenType) -> TokenType {
@@ -102,6 +109,7 @@ impl Tokenizer {
         if self.at_end() {
             return Ok(None);
         }
+        let start_location = self.make_span();
 
         let c = self.advance();
 
@@ -141,13 +149,13 @@ impl Tokenizer {
                 } else if other.is_ascii_alphabetic() || other == '_' {
                     self.scan_text(other)
                 } else {
-                    return Err(LexerError::InvalidCharacter(other, self.make_span()))
+                    return Err(LexerError::InvalidCharacter(other, start_location))
                 }
             }
         };
         Ok(Some(Token {
             token_type,
-            location: self.make_span(),
+            location: start_location,
         }))
     }
 
@@ -204,10 +212,10 @@ impl Tokenizer {
         }
     }
 
-    fn make_span(&mut self) -> Span {
+    fn make_span(&self) -> Span {
         Span {
             line_number: self.line,
-            col: self.current,
+            col: self.col,
         }
     }
 

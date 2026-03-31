@@ -33,10 +33,10 @@ impl IdentResolver {
         format!("{}.{}", name, self.current_id)
     }
 
-    fn resolve_parameter(&mut self, param: &String) -> Result<String, SemanticError> {
+    fn resolve_parameter(&mut self, param: &String, span: Span) -> Result<String, SemanticError> {
         if let Some(entry) = self.ident_map.get(param) {
             if entry.scope == self.current_id {
-                return Err(SemanticError::DoubleDeclaration(param.into()));
+                return Err(SemanticError::DoubleDeclaration(param.into(), span));
             }
         }
 
@@ -62,13 +62,13 @@ impl Visitor for IdentResolver {
             if let Some(entry) = self.ident_map.get(&var.identifier) {
                 if entry.scope == self.current_id &&
                    !(entry.has_linkage && var.storage == Some(StorageClass::Extern)) {
-                    return Err(SemanticError::DoubleDeclaration(var.identifier.clone()));
+                    return Err(SemanticError::DoubleDeclaration(var.identifier.clone(), var.span));
                 }
             }
             
             if var.storage == Some(StorageClass::Extern) {
                 if var.init.is_some() {
-                    return Err(SemanticError::InitializerOnLocalExtern(var.identifier.clone()));
+                    return Err(SemanticError::InitializerOnLocalExtern(var.identifier.clone(), var.span));
                 }
                 self.ident_map.insert(var.identifier.clone(), MapEntry { 
                     mapped_name: var.identifier.clone(),
@@ -95,16 +95,16 @@ impl Visitor for IdentResolver {
     fn visit_func_decl(&mut self, func: &mut FuncDeclaration) -> Result<(), SemanticError> {
         if self.current_id != 0 {
             if func.body.is_some() {
-                return Err(SemanticError::NestedFunctionDefinition(func.identifier.clone()));
+                return Err(SemanticError::NestedFunctionDefinition(func.identifier.clone(), func.span));
             }
             if func.storage == Some(StorageClass::Static) {
-                return Err(SemanticError::NonGlobalStaticFunc(func.identifier.clone()));
+                return Err(SemanticError::NonGlobalStaticFunc(func.identifier.clone(), func.span));
             }
         }
 
         if let Some(entry) = self.ident_map.get(&func.identifier) {
             if entry.scope == self.current_id && !entry.has_linkage {
-                return Err(SemanticError::DoubleDeclaration(func.identifier.clone()));
+                return Err(SemanticError::DoubleDeclaration(func.identifier.clone(), func.span));
             }
         }
 
@@ -119,7 +119,7 @@ impl Visitor for IdentResolver {
         
         let mut new_params = Vec::new();
         for param in &param_names {
-            new_params.push(self.resolve_parameter(param)?);
+            new_params.push(self.resolve_parameter(param, func.span)?);
         }
         func.params = new_params;
                 
@@ -154,40 +154,40 @@ impl Visitor for IdentResolver {
     }
 
     fn visit_expression(&mut self, expression: &mut Expression) -> Result<(), SemanticError> {
-        match expression {
-            Expression::Var(x) => {
+        match &mut expression.kind {
+            ExpressionKind::Var(x) => {
                 if let Some(entry) = self.ident_map.get(x) {
                     *x = entry.mapped_name.clone();
                 } else {
-                    return Err(SemanticError::UseBeforeDeclaration(x.clone()));
+                    return Err(SemanticError::UseBeforeDeclaration(x.clone(), expression.span));
                 }
             },
-            Expression::Assignment(lhs, rhs) => {
-                match lhs.as_mut() {
-                    Expression::Var(_) => {},
+            ExpressionKind::Assignment(lhs, rhs) => {
+                match lhs.kind {
+                    ExpressionKind::Var(_) => {},
                     _ => {
                         eprintln!("Invalid L-value: {:?}", lhs);
-                        return Err(SemanticError::InvalidLValue);
+                        return Err(SemanticError::InvalidLValue(expression.span));
                     }
                 }
                 self.visit_expression(lhs.as_mut())?;
                 self.visit_expression(rhs.as_mut())?;
             },
-            Expression::PostfixIncrement(exp) | Expression::PrefixIncrement(exp) | 
-            Expression::PostfixDecrement(exp) | Expression::PrefixDecrement(exp) => {
-                match **exp {
-                    Expression::Var(_) => self.visit_expression(exp.as_mut())?,
-                    _ => return Err(SemanticError::InvalidLValue),
+            ExpressionKind::PostfixIncrement(exp) | ExpressionKind::PrefixIncrement(exp) | 
+            ExpressionKind::PostfixDecrement(exp) | ExpressionKind::PrefixDecrement(exp) => {
+                match exp.kind {
+                    ExpressionKind::Var(_) => self.visit_expression(exp.as_mut())?,
+                    _ => return Err(SemanticError::InvalidLValue(expression.span)),
                 }
             },
-            Expression::FunctionCall(name, args) => {
+            ExpressionKind::FunctionCall(name, args) => {
                 if let Some(entry) = self.ident_map.get(name) {
                     *name = entry.mapped_name.clone();
                     for arg in args {
                         self.visit_expression(arg)?;
                     } 
                 } else {
-                    return Err(SemanticError::UseBeforeDeclaration(name.clone()));
+                    return Err(SemanticError::UseBeforeDeclaration(name.clone(), expression.span));
                 }
             },
             _ => walk_expression(self, expression)?,
@@ -196,9 +196,9 @@ impl Visitor for IdentResolver {
     }
 
     fn visit_statement(&mut self, statement: &mut Statement) -> Result<(), SemanticError> {
-        match statement {
-            Statement::Compound(blk) => self.visit_block(blk)?,
-            Statement::For { init, cond, post, body, lab:_ } => {
+        match &mut statement.kind {
+            StatementKind::Compound(blk) => self.visit_block(blk)?,
+            StatementKind::For { init, cond, post, body, lab:_ } => {
                 let (outer_id, snapshot) = self.enter_block();
                 match init {
                     ForInit::InitDec(d) => self.visit_var_decl(d)?,
