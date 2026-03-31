@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::parser::*;
+use crate::types::*;
 
 mod visitor_trait;
 
@@ -78,15 +79,6 @@ impl fmt::Display for SemanticError {
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Symbol {
-    pub ident: String,
-    pub datatype: Type,
-    pub attrs: IdentAttrs,
-}
-
-pub type SymbolTable = HashMap<String, Symbol>;
 
 impl std::error::Error for SemanticError {}
 

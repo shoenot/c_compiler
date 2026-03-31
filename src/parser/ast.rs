@@ -1,3 +1,6 @@
+use std::ops::Deref;
+use crate::lexer::Span;
+
 #[derive(Debug)]
 pub struct Program {
     pub declarations: Vec<Decl>,
@@ -114,12 +117,6 @@ pub enum BinaryOp {
     Ternary,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Type {
-    Int,
-    FuncType(usize),
-}
-
 pub trait HasStorage {
     fn storage_class(&self) -> Option<StorageClass>;
 }
@@ -135,3 +132,4 @@ impl HasStorage for FuncDeclaration {
         self.storage.clone()
     }
 }
+

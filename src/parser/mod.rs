@@ -1,6 +1,7 @@
 use std::iter::Peekable;
 use std::vec::IntoIter;
 use std::fmt;
+use crate::types::*;
 
 use crate::lexer::*; 
 
@@ -496,10 +497,7 @@ impl Parser {
                 let operand = self.parse_factor(None)?;
                 Expression::PrefixDecrement(Box::new(operand))
             },
-            _ => {
-                eprintln!("{:#?}", current_token);
-                return Err(ParseError::ExpectedExpression(self.current_span))
-            }
+            _ => return Err(ParseError::ExpectedExpression(self.current_span)),
         };
         let expr = self.check_postfix(expr)?;
         Ok(expr)
@@ -524,7 +522,7 @@ impl Parser {
     }
 
     fn check_postfix(&mut self, expr: Expression) -> Result<Expression, ParseError> {
-        let mut expr = expr;
+        let mut expr = expr.clone();
         loop {
             match self.next_token_type()? {
                 TokenType::DoublePlus => {
@@ -581,7 +579,7 @@ impl Parser {
         }
     }
 
-    fn precedence(&mut self, op: &BinaryOp) -> i32 {
+    fn precedence(&self, op: &BinaryOp) -> i32 {
         match op {
             BinaryOp::Multiply       => 50,
             BinaryOp::Divide         => 50,

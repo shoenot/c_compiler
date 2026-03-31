@@ -41,7 +41,7 @@ impl IdentResolver {
         }
 
         let newname = self.namegen(param);
-        self.ident_map.insert(param.to_string(), MapEntry { 
+        self.ident_map.insert(param.clone(), MapEntry { 
             mapped_name: newname.clone(), 
             scope: self.current_id, 
             has_linkage: false, 
@@ -95,16 +95,16 @@ impl Visitor for IdentResolver {
     fn visit_func_decl(&mut self, func: &mut FuncDeclaration) -> Result<(), SemanticError> {
         if self.current_id != 0 {
             if func.body.is_some() {
-                return Err(SemanticError::NestedFunctionDefinition(func.identifier.to_string()));
+                return Err(SemanticError::NestedFunctionDefinition(func.identifier.clone()));
             }
             if func.storage == Some(StorageClass::Static) {
-                return Err(SemanticError::NonGlobalStaticFunc(func.identifier.to_string()));
+                return Err(SemanticError::NonGlobalStaticFunc(func.identifier.clone()));
             }
         }
 
         if let Some(entry) = self.ident_map.get(&func.identifier) {
             if entry.scope == self.current_id && !entry.has_linkage {
-                return Err(SemanticError::DoubleDeclaration(func.identifier.to_string()));
+                return Err(SemanticError::DoubleDeclaration(func.identifier.clone()));
             }
         }
 
@@ -187,7 +187,7 @@ impl Visitor for IdentResolver {
                         self.visit_expression(arg)?;
                     } 
                 } else {
-                    return Err(SemanticError::UseBeforeDeclaration(name.to_string()));
+                    return Err(SemanticError::UseBeforeDeclaration(name.clone()));
                 }
             },
             _ => walk_expression(self, expression)?,

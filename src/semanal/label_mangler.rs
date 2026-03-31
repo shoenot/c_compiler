@@ -60,7 +60,7 @@ impl Visitor for LabelMangler {
                 let labelname = name.clone();
                 if self.label_map.contains_key(&labelname) {
                     let (newname, _) = self.label_map.get(&labelname).unwrap();
-                    *name = String::from(newname);
+                    *name = newname.clone();
                     Ok(())
                 } else {
                     let newlabel = self.labelgen(&labelname);

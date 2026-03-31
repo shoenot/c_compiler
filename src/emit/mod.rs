@@ -1,5 +1,6 @@
-use crate::{codegen::*, semanal::{IdentAttrs, Symbol, SymbolTable, is_extern}};
 use std::{collections::HashMap, fmt};
+use crate::codegen::*;
+use crate::types::*;
 
 #[derive(Debug)]
 pub enum EmissionError {
@@ -37,17 +38,17 @@ pub fn emit_program(program: AsmProgram, symbols: &mut SymbolTable)-> Result<Str
 
 fn emit_var(var: AsmStaticVar, output: &mut String) -> Result<(), EmissionError> {
     if var.global {
-        output.push_str(&format!("\t.globl {}\n", var.name));
+        output.push_str(&format!("\t.globl {}\n", var.identifier));
     }
     if var.init == 0 {
         output.push_str("\t.bss\n");
         output.push_str("\t.align 4\n");
-        output.push_str(&format!("{}:\n", var.name));
+        output.push_str(&format!("{}:\n", var.identifier));
         output.push_str("\t.zero 4\n");
     } else {
         output.push_str("\t.data\n");
         output.push_str("\t.align 4\n");
-        output.push_str(&format!("{}:\n", var.name));
+        output.push_str(&format!("{}:\n", var.identifier));
         output.push_str(&format!("\t.long {}\n", var.init));
     }
     Ok(())
@@ -55,13 +56,13 @@ fn emit_var(var: AsmStaticVar, output: &mut String) -> Result<(), EmissionError>
 
 fn emit_function(function: AsmFunction, output: &mut String, symbols: &mut HashMap<String, Symbol>) -> Result<(), EmissionError> {
     if function.global {
-        output.push_str(&format!("\t.globl {}\n", function.name));
+        output.push_str(&format!("\t.globl {}\n", function.identifier));
     }
     output.push_str("\t.text\n");
-    output.push_str(&format!("{}:\n", function.name));
+    output.push_str(&format!("{}:\n", function.identifier));
     output.push_str("\tpushq\t%rbp\n");
     output.push_str("\tmovq\t%rsp,\t%rbp\n");
-    for instruction in function.instructions {
+    for instruction in function.body {
        emit_instruction(instruction, output, symbols)?;
     }
     Ok(())

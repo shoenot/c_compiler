@@ -3,7 +3,8 @@ use std::collections::VecDeque;
 
 use stack::*;
 
-use crate::{poise::{self, PoiseBinaryOp, PoiseVal, TopLevelItem}, semanal::SymbolTable};
+use crate::poise::{self, PoiseBinaryOp, PoiseVal, TopLevelItem};
+use crate::types::SymbolTable;
 
 #[derive(Debug)]
 pub struct AsmProgram {
@@ -18,14 +19,14 @@ pub enum AsmTopLevel {
 
 #[derive(Debug, Clone)]
 pub struct AsmFunction { 
-    pub name: String, 
+    pub identifier: String, 
     pub global: bool, 
-    pub instructions: Vec<AsmInstruction>,
+    pub body: Vec<AsmInstruction>,
 }
 
 #[derive(Debug)]
 pub struct AsmStaticVar {
-    pub name: String, 
+    pub identifier: String, 
     pub global: bool, 
     pub init: i32,
 }
@@ -122,7 +123,7 @@ pub fn gen_program(tree: poise::PoiseProg, symbols: &SymbolTable) -> AsmProgram 
 }
 
 pub fn gen_static_var(var: poise::PoiseStaticVar) -> AsmTopLevel {
-    AsmTopLevel::V(AsmStaticVar { name: var.identifier, global: var.global, init: var.init })
+    AsmTopLevel::V(AsmStaticVar { identifier: var.identifier, global: var.global, init: var.init })
 }
 
 fn copy_param(num: usize, param: String) -> AsmInstruction {
@@ -142,12 +143,12 @@ fn copy_param(num: usize, param: String) -> AsmInstruction {
 
 fn gen_function(func: poise::PoiseFunc) -> AsmFunction {
     let mut generated = Vec::new();
-    let name = func.identifier;
+    let identifier = func.identifier;
     func.params.iter()
         .enumerate()
         .for_each(|(num , param)| generated.push(copy_param(num, param.into())));
     gen_instructions(func.body, &mut generated);
-    AsmFunction { name, global: func.global, instructions: generated }
+    AsmFunction { identifier, global: func.global, body: generated }
 }
 
 fn gen_instructions(instructions: Vec<poise::PoiseInstruction>, generated: &mut Vec<AsmInstruction>) {
@@ -250,7 +251,7 @@ fn unary_handler(op: poise::PoiseUnaryOp, src: PoiseVal, dst: PoiseVal, generate
 }
 
 fn gen_binary(exp: poise::PoiseBinaryOp) -> BinaryOp {
-    let operator = match exp {
+    match exp {
         poise::PoiseBinaryOp::Add => BinaryOp::Add,
         poise::PoiseBinaryOp::Subtract => BinaryOp::Sub,
         poise::PoiseBinaryOp::Multiply => BinaryOp::Mult,
@@ -260,17 +261,15 @@ fn gen_binary(exp: poise::PoiseBinaryOp) -> BinaryOp {
         poise::PoiseBinaryOp::BitwiseOr  => BinaryOp::BitOr,
         poise::PoiseBinaryOp::BitwiseXor => BinaryOp::BitXor,
         _ => unreachable!(),
-    };
-    operator
+    }
 }
 
 fn gen_division(exp: PoiseBinaryOp) -> Register {
-    let operator = match exp {
+    match exp {
         poise::PoiseBinaryOp::Divide => Register::AX,
         poise::PoiseBinaryOp::Remainder => Register::DX,
         _ => unreachable!(),
-    };
-    operator
+    }
 }
 
 fn gen_conditional(op: PoiseBinaryOp) -> Condition {
