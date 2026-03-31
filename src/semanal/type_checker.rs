@@ -16,6 +16,17 @@ pub enum InitialValue {
     NoInitializer,
 }
 
+impl IdentAttrs {
+    pub fn is_global(&self) -> bool {
+        match &self {
+            IdentAttrs::StaticAttr { init:_ , global } => *global,
+            IdentAttrs::FuncAttr { defined:_ , global } => *global,
+            IdentAttrs::LocalAttr => false,
+        }
+    }
+}
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Symbol {
     pub ident: String,
@@ -24,7 +35,8 @@ pub struct Symbol {
 }
 
 struct TypeChecker<'a> {
-    symbols: &'a mut HashMap<String, Symbol>
+    symbols: &'a mut HashMap<String, Symbol>,
+    scope_depth: usize,
 }
 
 impl Symbol {
@@ -84,6 +96,8 @@ impl<'a> TypeChecker<'a> {
                 } else if !matches!(initial_value, InitialValue::Initial(..)) && matches!(old_init, InitialValue::Tentative) {
                     initial_value = InitialValue::Tentative;
                 }
+            } else {
+                return Err(SemanticError::FuncUsedAsVar(decl.identifier.clone()));
             }
         }
         self.symbols.insert(decl.identifier.clone(),
@@ -116,6 +130,8 @@ impl<'a> Visitor for TypeChecker<'a> {
                     return Err(SemanticError::StaticAfterNonStatic(function.identifier.clone()));
                 }
                 global = oldglobal;
+            } else {
+                return Err(SemanticError::IncompatibleFuncDeclaration(function.identifier.clone()));
             }
         }
 
@@ -126,14 +142,19 @@ impl<'a> Visitor for TypeChecker<'a> {
             for parameter in &function.params {
                 self.symbols.insert(parameter.clone(), Symbol::new_var(parameter.clone(), Type::Int));
             }
+            self.scope_depth += 1;
+            walk_func_decl(self, function)?;
+            self.scope_depth -= 1;
         }
 
-        walk_func_decl(self, function)?;
         Ok(())
     }
 
     fn visit_var_decl(&mut self, decl: &mut VarDeclaration) -> Result<(), SemanticError> {
-        let mut initial_value = InitialValue::NoInitializer;
+        if self.scope_depth == 0 {
+            return self.check_global_var(decl);
+        }
+
         if is_extern(decl) {
             if decl.init != None {
                 return Err(SemanticError::InitializerOnLocalExtern(decl.identifier.clone()));
@@ -147,6 +168,7 @@ impl<'a> Visitor for TypeChecker<'a> {
                     Symbol::new_static_var(decl.identifier.clone(), Type::Int, InitialValue::NoInitializer, true));
             }
         } else if is_static(decl) {
+            let initial_value;
             if let Some(Expression::Constant(i)) = decl.init {
                 initial_value = InitialValue::Initial(i);
             } else if decl.init == None {
@@ -158,6 +180,7 @@ impl<'a> Visitor for TypeChecker<'a> {
                 Symbol::new_static_var(decl.identifier.clone(), Type::Int, initial_value, false));
         } else {
             self.symbols.insert(decl.identifier.clone(), Symbol::new_var(decl.identifier.clone(), Type::Int));
+            walk_var_decl(self, decl)?;
         }
         Ok(())
     }
@@ -195,6 +218,6 @@ impl<'a> Visitor for TypeChecker<'a> {
 }
 
 pub fn type_checking_pass(program: &mut Program, symbols: &mut HashMap<String, Symbol>) -> Result<(), SemanticError> {
-    let mut checker = TypeChecker { symbols };
+    let mut checker = TypeChecker { symbols, scope_depth: 0 };
     checker.visit_program(program)
 }

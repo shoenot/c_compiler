@@ -45,6 +45,7 @@ pub enum SemanticError {
     ConflictingDefinitions(String),
     LocalStaticVarNonConstantInit(String),
     InitializerOnLocalExtern(String),
+    NonGlobalStaticFunc(String),
 }
 
 impl fmt::Display for SemanticError {
@@ -73,6 +74,7 @@ impl fmt::Display for SemanticError {
             SemanticError::ConflictingDefinitions(n) => write!(f, "Conflicting definitions {}", n),
             SemanticError::LocalStaticVarNonConstantInit(n) => write!(f, "Local static variable with non-constant init {}", n),
             SemanticError::InitializerOnLocalExtern(n) => write!(f, "Init on local external variable {}", n),
+            SemanticError::NonGlobalStaticFunc(n) => write!(f, "Non global static function {}", n),
         }
     }
 }

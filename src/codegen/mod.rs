@@ -3,7 +3,8 @@ use std::collections::VecDeque;
 
 use stack::*;
 
-use crate::poise::{self, PoiseBinaryOp, PoiseVal};
+use crate::poise::{self, PoiseBinaryOp, PoiseVal, TopLevelItem};
+
 #[derive(Debug)]
 pub struct AsmProgram {
     pub functions: Vec<AsmFunction>,
@@ -93,9 +94,11 @@ pub enum Condition {
 
 pub fn gen_program(tree: poise::PoiseProg) -> AsmProgram {
     let mut functions = Vec::new();
-    for func in tree.functions {
-        let function = gen_function(func);
-        functions.push(function);
+    for item in tree.top_level_items {
+        if let TopLevelItem::Func { .. } = item {
+            let function = gen_function(item);
+            functions.push(function);
+        }
     }
     functions = assign_stack_slots(functions);
     AsmProgram { functions }
@@ -116,13 +119,16 @@ fn copy_param(num: usize, param: String) -> AsmInstruction {
     }
 }
 
-fn gen_function(func: poise::PoiseFunc) -> AsmFunction {
+fn gen_function(func: poise::TopLevelItem) -> AsmFunction {
     let mut generated = Vec::new();
-    let name = func.identifier;
-    func.params.iter()
-        .enumerate()
-        .for_each(|(num , param)| generated.push(copy_param(num, param.into())));
-    gen_instructions(func.body, &mut generated);
+    let mut name = String::new();
+    if let TopLevelItem::Func { identifier, params, body, .. } = func {
+        name = identifier;
+        params.iter()
+            .enumerate()
+            .for_each(|(num , param)| generated.push(copy_param(num, param.into())));
+        gen_instructions(body, &mut generated);
+    }
     AsmFunction { name, body: generated }
 }
 

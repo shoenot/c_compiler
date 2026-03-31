@@ -2,7 +2,7 @@ use std::collections::hash_map::HashMap;
 use super::*;
 use visitor_trait::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MapEntry {
     mapped_name: String,
     scope: usize,
@@ -16,18 +16,21 @@ struct IdentResolver {
 }
 
 impl IdentResolver {
-    fn enter_block(&mut self) -> usize {
+    fn enter_block(&mut self) -> (usize, HashMap<String, MapEntry>) {
         let outer_id = self.current_id;
+        let snapshot = self.ident_map.clone();
         self.current_id = self.next_id;
         self.next_id += 1;
-        outer_id
+        (outer_id, snapshot)
     }
 
-    fn leave_block(&mut self, outer: usize) {
-        self.current_id = outer;
+    fn leave_block(&mut self, outer_id: usize, snapshot: HashMap<String, MapEntry>) {
+        self.current_id = outer_id;
+        self.ident_map = snapshot;
     }
-fn namegen(&mut self, name: &str) -> String { let new = format!("{}.{}", name, self.current_id);
-        new
+
+    fn namegen(&mut self, name: &str) -> String {
+        format!("{}.{}", name, self.current_id)
     }
 
     fn resolve_parameter(&mut self, param: &String) -> Result<String, SemanticError> {
@@ -94,10 +97,13 @@ impl Visitor for IdentResolver {
             if func.body.is_some() {
                 return Err(SemanticError::NestedFunctionDefinition(func.identifier.to_string()));
             }
+            if func.storage == Some(StorageClass::Static) {
+                return Err(SemanticError::NonGlobalStaticFunc(func.identifier.to_string()));
+            }
         }
 
         if let Some(entry) = self.ident_map.get(&func.identifier) {
-            if self.current_id != 0 && !entry.has_linkage {
+            if entry.scope == self.current_id && !entry.has_linkage {
                 return Err(SemanticError::DoubleDeclaration(func.identifier.to_string()));
             }
         }
@@ -107,42 +113,43 @@ impl Visitor for IdentResolver {
             scope: self.current_id,  
             has_linkage: true, 
         });
-        
 
+        let param_names: Vec<String> = func.params.iter().cloned().collect();
+        let (outer_id, snapshot) = self.enter_block();
+        
+        let mut new_params = Vec::new();
+        for param in &param_names {
+            new_params.push(self.resolve_parameter(param)?);
+        }
+        func.params = new_params;
+                
         match &mut func.body {
-            None => return Ok(()),
+            None => {
+                self.leave_block(outer_id, snapshot);
+                return Ok(());
+            }
             Some(blk) => {
-                let param_names: Vec<String> = func.params.iter().cloned().collect();
-                let outer = self.enter_block();
-                
-                let mut new_params = Vec::new();
-                for param in &param_names {
-                    new_params.push(self.resolve_parameter(param)?);
-                }
-                func.params = new_params;
-                
                 for item in &mut blk.items {
                     match item {
                         BlockItem::D(d) => self.visit_declaration(d)?,
                         BlockItem::S(s) => self.visit_statement(s)?,
                     }
                 }
-                
-                self.leave_block(outer);
+                self.leave_block(outer_id, snapshot);
                 Ok(())
             }
         }
     }
 
     fn visit_block(&mut self, block: &mut Block) -> Result<(), SemanticError> {
-        let outer = self.enter_block();
+        let (outer_id, snapshot) = self.enter_block();
         for item in &mut block.items {
             match item {
                 BlockItem::D(d) => self.visit_declaration(d)?,
                 BlockItem::S(s) => self.visit_statement(s)?,
             }
         }
-        self.leave_block(outer);
+        self.leave_block(outer_id, snapshot);
         Ok(())
     }
 
@@ -191,6 +198,22 @@ impl Visitor for IdentResolver {
     fn visit_statement(&mut self, statement: &mut Statement) -> Result<(), SemanticError> {
         match statement {
             Statement::Compound(blk) => self.visit_block(blk)?,
+            Statement::For { init, cond, post, body, lab:_ } => {
+                let (outer_id, snapshot) = self.enter_block();
+                match init {
+                    ForInit::InitDec(d) => self.visit_var_decl(d)?,
+                    ForInit::InitExp(Some(e)) => self.visit_expression(e)?,
+                    _ => {}
+                }
+                if let Some(c) = cond {
+                    self.visit_expression(c)?;
+                }
+                if let Some(p) = post {
+                    self.visit_expression(p)?;
+                }
+                self.visit_statement(body)?;
+                self.leave_block(outer_id, snapshot);
+            },
             _ => walk_statement(self, statement)?,
         }
         Ok(())

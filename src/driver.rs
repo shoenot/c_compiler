@@ -71,8 +71,8 @@ fn run_semanal(program: &mut Program, symbols: &mut HashMap<String, Symbol>) -> 
     Ok(var_map)
 }
 
-fn run_poise(program: Program) -> PoiseProg {
-    gen_poise(&program)
+fn run_poise(program: Program, symbols: &mut HashMap<String, Symbol>) -> PoiseProg {
+    gen_poise(&program, symbols)
 }
 
 fn run_codegen(program: PoiseProg) -> AsmProgram {
@@ -115,12 +115,10 @@ pub fn run_compiler(input_file: &PathBuf, args: crate::Args) -> Result<PathBuf, 
         std::process::exit(0);
     }
 
-    let poise = run_poise(parsed);
+    let poise = run_poise(parsed, &mut symbols);
     if args.tacky {
-        for function in poise.functions {
-            for item in function.body {
-                println!("{:?}", item);
-            }
+        for item in poise.top_level_items  {
+            println!("{:?}", item);
         }
         std::process::exit(0);
     }

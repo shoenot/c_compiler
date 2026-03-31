@@ -1,15 +1,16 @@
-use crate::parser;
+use std::collections::HashMap;
+
+use crate::{parser, semanal::{IdentAttrs, InitialValue, Symbol}};
 
 #[derive(Debug)]
 pub struct PoiseProg {
-    pub functions: Vec<PoiseFunc>,
+    pub top_level_items: Vec<TopLevelItem>,
 }
 
 #[derive(Debug)]
-pub struct PoiseFunc {
-    pub identifier: String,
-    pub params: Vec<String>,
-    pub body: Vec<PoiseInstruction>
+pub enum TopLevelItem {
+    Func {identifier: String, global: bool, params: Vec<String>, body: Vec<PoiseInstruction>},
+    StaticVar {identifier: String, global: bool, init: i32},
 }
 
 #[derive(Debug, Clone)]
@@ -82,28 +83,34 @@ impl TmpCount {
     }
 }
 
-pub fn gen_poise(tree: &parser::Program) -> PoiseProg {
+type SymbolTable = HashMap<String, Symbol>;
+
+pub fn gen_poise(tree: &parser::Program, symbols: &SymbolTable) -> PoiseProg {
     let mut count = TmpCount{var_counter: 0, label_counter: 0};
     let mut instructions = Vec::new();
-    let mut functions = Vec::new();
-    let mut globals = Vec::new();
+    let mut top_level_items = Vec::new();
     for decl in &tree.declarations {
         match decl {
             parser::Decl::FuncDecl(f) => if f.body.is_some() {
-                functions.push(gen_poisefunc(f, &mut instructions, &mut count));
+                top_level_items.push(gen_poisefunc(f, &mut instructions, &mut count, symbols));
             },
-            parser::Decl::VarDecl(v) => globals.push(gen_inst_var_declaration(v, &mut instructions, &mut count)),
+            _ => {},
         }
     }
-    PoiseProg { functions }
+    top_level_items.extend(gen_static_symbols(symbols));
+    PoiseProg { top_level_items }
 }
 
-fn gen_poisefunc(func: &parser::FuncDeclaration, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount) -> PoiseFunc {
-    let name = func.identifier.clone();
+fn gen_poisefunc(func: &parser::FuncDeclaration, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount, symbols: &SymbolTable) -> TopLevelItem {
+    let identifier = func.identifier.clone();
     let params = func.params.clone();
     gen_inst_block(func.body.as_ref().unwrap(), instructions, count);
     instructions.push(PoiseInstruction::Return(PoiseVal::Constant(0)));
-    PoiseFunc{ identifier: name, params, body: instructions.to_vec() }
+    let mut global = false;
+    if let Some(sym) = symbols.get(&identifier) {
+        global = sym.attrs.is_global()
+    }
+    TopLevelItem::Func { identifier, global, params, body: instructions.to_vec() }
 }
 
 fn gen_inst_block(block: &parser::Block, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount) {
@@ -412,4 +419,18 @@ fn emit_short_circuit_exp(op: &parser::BinaryOp,
         },
         _ => panic!(),
     }
+}
+
+fn gen_static_symbols(symbols: &SymbolTable) -> Vec<TopLevelItem> {
+    let mut defs = Vec::new();
+    for (k, v) in symbols {
+        if let IdentAttrs::StaticAttr { init, global } = &v.attrs {
+            match init {
+                InitialValue::Initial(v) => defs.push(TopLevelItem::StaticVar { identifier: k.clone(), global:*global, init: *v }),
+                InitialValue::Tentative => defs.push(TopLevelItem::StaticVar { identifier: k.clone(), global:*global, init: 0 }),
+                InitialValue::NoInitializer => {}
+            }
+        }
+    }
+    defs
 }
