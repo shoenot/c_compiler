@@ -5,8 +5,7 @@ pub mod tokens;
 pub use tokens::TokenType;
 
 #[derive(Debug)]
-pub enum LexerError {
-    IntegerOverflow(Span),
+pub enum LexerError { IntegerOverflow(Span),
     InvalidCharacter(char, Span),
 }
 
@@ -170,11 +169,28 @@ impl Tokenizer {
             number.push(self.advance());
         }
 
+        let mut parsed = None;
+
         if self.peek().is_ascii_alphabetic() {
-            return Err(LexerError::InvalidCharacter(self.peek(), self.make_span()))
+            let suffix = self.peek();
+            match suffix {
+                'l' | 'L' => {
+                    self.advance();
+                    parsed = Some(TokenType::LongConstant(number.clone()));
+                },
+                _ => return Err(LexerError::InvalidCharacter(suffix, self.make_span())),
+            }
         }
-        number.parse().map(TokenType::Constant)
-            .map_err(|_| LexerError::IntegerOverflow(self.make_span()))
+        
+        if self.peek().is_ascii_alphabetic() {
+            return Err(LexerError::InvalidCharacter(self.peek(), self.make_span()));
+        }
+        
+        if let Some(token) = parsed {
+            Ok(token)
+        } else {
+            Ok(TokenType::Constant(number))
+        }
     }
 
     fn parse_keyword(&self, lexeme: &str) -> Option<TokenType> {
@@ -195,6 +211,7 @@ impl Tokenizer {
             "default" => TokenType::Default,
             "static" => TokenType::Static,
             "extern" => TokenType::Extern,
+            "long" => TokenType::Long,
             _ => return None,
         };
 

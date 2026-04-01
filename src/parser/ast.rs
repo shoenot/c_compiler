@@ -1,4 +1,5 @@
 use std::ops::{Deref, DerefMut};
+use crate::types::Type;
 use crate::lexer::Span;
 
 #[derive(Debug)]
@@ -28,6 +29,7 @@ pub enum Decl {
 #[derive(Debug, Clone)]
 pub struct FuncDeclaration {
     pub identifier: String,
+    pub func_type: Type,
     pub params: Vec<String>,
     pub body: Option<Block>,
     pub storage: Option<StorageClass>,
@@ -46,6 +48,7 @@ impl PartialEq for FuncDeclaration {
 #[derive(Debug, Clone)]
 pub struct VarDeclaration {
     pub identifier: String,
+    pub var_type: Type,
     pub init: Option<Expression>,
     pub storage: Option<StorageClass>,
     pub span: Span,
@@ -54,6 +57,7 @@ pub struct VarDeclaration {
 impl PartialEq for VarDeclaration {
     fn eq(&self, other: &Self) -> bool {
         self.identifier == other.identifier &&
+        self.var_type == other.var_type &&
         self.init == other.init &&
         self.storage == other.storage 
     }
@@ -156,8 +160,9 @@ impl PartialEq for Expression {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExpressionKind {
-    Constant(i32),
+    Constant(Const),
     Var(String),
+    Cast(Type, Box<Expression>),
     Assignment(Box<Expression>, Box<Expression>),
     Unary(UnaryOp, Box<Expression>),
     Binary(BinaryOp, Box<Expression>, Box<Expression>),
@@ -167,6 +172,12 @@ pub enum ExpressionKind {
     PrefixDecrement(Box<Expression>),
     PostfixDecrement(Box<Expression>),
     FunctionCall(String, Vec<Expression>),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Const {
+    Int(i32),
+    Long(i64),
 }
 
 impl Deref for Expression {

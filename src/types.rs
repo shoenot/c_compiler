@@ -1,9 +1,10 @@
 use std::collections::hash_map::HashMap;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
-    FuncType(usize),
+    Long,
+    FuncType{params: Vec<Box<Type>>, ret: Box<Type>},
 }
 
 #[derive(Debug, Clone, PartialEq)]

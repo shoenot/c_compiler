@@ -29,7 +29,7 @@ pub enum TokenType {
     DoubleRightAngled,
     LessOrEqual,
     GreaterOrEqual,
-    Constant(i32),
+    Constant(String),
     PlusEqual,
     MinusEqual,
     AsteriskEqual,
@@ -59,4 +59,6 @@ pub enum TokenType {
     Default,
     Static,
     Extern,
+    Long,
+    LongConstant(String),
 }

@@ -20,6 +20,8 @@ pub enum ParseError {
     LabelWithoutStatement(Span),
     InvalidTypes(Span),
     InvalidStorageClasses(Span),
+    DuplicateTypes(Span),
+    IntegerOverflow(Span),
 }
 
 impl fmt::Display for ParseError {
@@ -35,6 +37,8 @@ impl fmt::Display for ParseError {
             ParseError::LabelWithoutStatement(s) => write!(f, "Parse Error: label without statement!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::InvalidTypes(s) => write!(f, "Parse Error: invalid types!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::InvalidStorageClasses(s) => write!(f, "Parse Error: invalid storage classes!\nLine: {}, Col: {}", s.line_number, s.col),
+            ParseError::DuplicateTypes(s) => write!(f, "Parse Error: duplicate types!\nLine: {}, Col: {}", s.line_number, s.col),
+            ParseError::IntegerOverflow(s) => write!(f, "Parse Error: integer overflow!\nLine: {}, Col: {}", s.line_number, s.col),
         }
     }
 }
@@ -46,6 +50,42 @@ pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
     current_span: Span,
 }
+
+#[derive(Debug)]
+struct TypeFlags {
+    saw_int: bool,
+    saw_long: bool,
+}
+
+impl TypeFlags {
+    fn new() -> Self {
+        TypeFlags { 
+            saw_int: false,
+            saw_long: false,
+        }
+    }
+
+    fn set_flag(&mut self, dtype: &TokenType, span: &Span) -> Result<(), ParseError> {
+        match dtype {
+            TokenType::Int => if self.saw_int != true {self.saw_int = true} else {
+                return Err(ParseError::InvalidTypes(span.clone())) },
+            TokenType::Long => if self.saw_long != true {self.saw_long = true} else {
+                return Err(ParseError::InvalidTypes(span.clone())) },
+            _ => return Err(ParseError::InvalidTypes(span.clone())),
+        }
+        Ok(())
+    }
+
+    fn get_type(&self, span: &Span) -> Result<Type, ParseError> {
+        match self {
+            TypeFlags { saw_int:true, saw_long:false } => Ok(Type::Int),
+            TypeFlags { saw_int:false, saw_long:true } => Ok(Type::Long),
+            TypeFlags { saw_int:true, saw_long:true } => Ok(Type::Long),
+            _ => Err(ParseError::InvalidTypes(span.clone())),
+        }
+    }
+}
+
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Parser {
@@ -95,7 +135,8 @@ impl Parser {
 
     fn next_token_is_specifier(&mut self) -> bool {
         self.peek().map_or(false, |token| {
-            matches!(token.token_type, TokenType::Int | TokenType::Static | TokenType::Extern)
+            matches!(token.token_type, TokenType::Int | TokenType::Static |
+                TokenType::Extern | TokenType::Long)
         })
     }
 
@@ -130,7 +171,7 @@ impl Parser {
         }
         self.expect_eof()?;
         Ok(Program { declarations })
-    }
+    } 
 
     ////////////////////
     /// DECLARATIONS ///
@@ -146,18 +187,24 @@ impl Parser {
         Ok(decl)
     }
 
+    fn parse_types(&mut self, types: &Vec<TokenType>) -> Result<Type, ParseError> {
+        let mut flags = TypeFlags::new();
+        for item in types {
+            flags.set_flag(&item, &self.current_span)?;
+        }
+        flags.get_type(&self.current_span)
+    }
+
     fn parse_specifiers(&mut self) -> Result<(Type, Option<StorageClass>), ParseError> {
         let mut storage = None;
-        let mut type_option = None;
+        let mut types = Vec::new();
         loop {
             if let TokenType::Identifier(_) = self.next_token_type()? {
                 break;
             } else {
-                match self.advance()?.token_type {
-                    TokenType::Int => { 
-                        if type_option.is_none() { type_option = Some(Type::Int) } else 
-                        { return Err(ParseError::InvalidTypes(self.current_span)) }
-                    },
+                let token = self.advance()?.token_type;
+                match token {
+                    TokenType::Int | TokenType::Long => types.push(token),
                     TokenType::Static => { 
                         if storage.is_none() { storage = Some(StorageClass::Static) } else 
                         { return Err(ParseError::InvalidStorageClasses(self.current_span)) }
@@ -170,36 +217,53 @@ impl Parser {
                 }
             }
         }
-        if type_option.is_none() { return Err(ParseError::InvalidTypes(self.current_span)) }
-        let dtype = type_option.unwrap();
+        let dtype = self.parse_types(&types)?;
         Ok((dtype, storage))
     }
 
 
-    fn parse_func_declaration(&mut self, identifier: String, _return_type: Type, storage: Option<StorageClass>) 
+    fn parse_func_declaration(&mut self, identifier: String, return_type: Type, storage: Option<StorageClass>) 
         -> Result<FuncDeclaration, ParseError> {
-        let params = self.parse_func_params()?;
+        let (param_types, params) = self.parse_func_params()?;
+        let func_type = Type::FuncType { params: param_types, ret: Box::new(return_type) };
         let mut body = None;
         if self.next_token_is(TokenType::OpenBrace) {
             body = Some(self.parse_block()?);
         } else {
             self.expect(TokenType::Semicolon)?;
         }
-        Ok(FuncDeclaration { identifier, params, body, storage, span: self.current_span }) 
+        Ok(FuncDeclaration { identifier, func_type, params, body, storage, span: self.current_span }) 
     }
 
-    fn parse_func_params(&mut self) -> Result<Vec<String>, ParseError> {
+    fn collect_param_type(&mut self) -> Result<Type, ParseError> {
+        let mut types = Vec::new();
+        while !matches!(self.next_token_type()?, TokenType::Identifier(_)) {
+            let next = self.next_token_type()?;
+            match next {
+                TokenType::Int | TokenType::Long => {
+                    self.advance()?;
+                    types.push(next);
+                },
+                _ => return Err(ParseError::InvalidTypes(self.current_span)),
+            }
+        }
+        self.parse_types(&types)
+    }
+
+    fn parse_func_params(&mut self) -> Result<(Vec<Box<Type>>, Vec<String>), ParseError> {
         self.expect(TokenType::OpenParen)?;
+        let mut types_list = Vec::new();
         let mut params_list = Vec::new();
         if self.next_token_is(TokenType::Void) {
             self.advance()?;
             self.expect(TokenType::CloseParen)?;
-            return Ok(params_list)
+            return Ok((types_list, params_list))
         }
 
         while !self.next_token_is(TokenType::CloseParen) {
-            self.expect(TokenType::Int)?;
+            let ptype = self.collect_param_type()?;
             if let TokenType::Identifier(param) = self.advance()?.token_type {
+                types_list.push(Box::new(ptype));
                 params_list.push(param);
             } else {
                 return Err(ParseError::ExpectedParam(self.current_span));
@@ -207,8 +271,9 @@ impl Parser {
 
             while self.next_token_is(TokenType::Comma) {
                 self.expect(TokenType::Comma)?;
-                self.expect(TokenType::Int)?;
+                let ptype = self.collect_param_type()?;
                 if let TokenType::Identifier(param) = self.advance()?.token_type {
+                    types_list.push(Box::new(ptype));
                     params_list.push(param);
                 } else {
                     return Err(ParseError::ExpectedParam(self.current_span));
@@ -218,10 +283,10 @@ impl Parser {
         }
 
         self.expect(TokenType::CloseParen)?;
-        Ok(params_list)
+        Ok((types_list, params_list))
     }
 
-    fn parse_var_declaration(&mut self, identifier: String, _dtype: Type, storage: Option<StorageClass>) 
+    fn parse_var_declaration(&mut self, identifier: String, var_type: Type, storage: Option<StorageClass>) 
         -> Result<VarDeclaration, ParseError> {
         let mut init = None;
         if !self.next_token_is(TokenType::Semicolon) {
@@ -229,7 +294,7 @@ impl Parser {
             init = Some(self.parse_expression(0)?);
         }
         self.expect(TokenType::Semicolon)?;
-        Ok(VarDeclaration{identifier, init, storage, span: self.current_span})
+        Ok(VarDeclaration{identifier, var_type, init, storage, span: self.current_span})
     }
 
     //////////////
@@ -397,7 +462,7 @@ impl Parser {
                 ForInit::InitExp(None)
             },
             _ => {
-                if self.next_token_is(TokenType::Int) {
+                if self.next_token_is(TokenType::Int) | self.next_token_is(TokenType::Long) {
                     let dec = match self.parse_declaration()? {
                         Decl::VarDecl(v) => v,
                         Decl::FuncDecl(_) => return Err(ParseError::ExpectedVarDecl(self.current_span)),
@@ -474,13 +539,27 @@ impl Parser {
         Ok(exp)
     }
 
+    fn parse_const(&self, number: String) -> Result<Const, ParseError> {
+        let v = number.parse::<i64>().map_err(|_| ParseError::IntegerOverflow(self.current_span))?;
+
+        if v <= 2_i64.pow(31) - 1 {
+            Ok(Const::Int(v as i32))
+        } else {
+            Ok(Const::Long(v))
+        }
+    }
+
     fn parse_factor(&mut self, token: Option<Token>) -> Result<Expression, ParseError> {
         let current_token = match token {
             Some(t) => t, 
             None => self.advance()?,
         };
         let expr = match current_token.token_type {
-            TokenType::Constant(value) => self.new_expr(ExpressionKind::Constant(value)),
+            TokenType::Constant(value) => self.new_expr(ExpressionKind::Constant(self.parse_const(value)?)),
+            TokenType::LongConstant(value) => {
+                let v = value.parse::<i64>().map_err(|_| ParseError::IntegerOverflow(self.current_span))?;
+                self.new_expr(ExpressionKind::Constant(Const::Long(v)))
+            },
             TokenType::OpenParen => {
                 let expression = self.parse_expression(0)?;
                 self.expect(TokenType::CloseParen)?;
