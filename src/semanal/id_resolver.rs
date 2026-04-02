@@ -162,6 +162,7 @@ impl Visitor for IdentResolver {
                     return Err(SemanticError::UseBeforeDeclaration(x.clone(), expression.span));
                 }
             },
+            ExpressionKind::Cast(_, x) => self.visit_expression(x.as_mut())?,
             ExpressionKind::Assignment(lhs, rhs) => {
                 match lhs.kind {
                     ExpressionKind::Var(_) => {},

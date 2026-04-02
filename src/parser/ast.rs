@@ -149,6 +149,7 @@ pub enum ForInit {
 #[derive(Debug, Clone)]
 pub struct Expression {
     pub kind: ExpressionKind,
+    pub expression_type: Option<Type>,
     pub span: Span,
 }
 
@@ -195,8 +196,8 @@ impl DerefMut for Expression {
 }
 
 impl Expression {
-    pub fn new(kind: ExpressionKind, span: Span) -> Self {
-        Expression{kind, span}
+    pub fn new(kind: ExpressionKind, expression_type: Option<Type>, span: Span) -> Self {
+        Expression{kind, expression_type, span}
     }
 }
 

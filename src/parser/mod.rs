@@ -140,6 +140,12 @@ impl Parser {
         })
     }
 
+    fn next_token_is_type(&mut self) -> bool {
+        self.peek().map_or(false, |token| {
+            matches!(token.token_type, TokenType::Int | TokenType::Long)
+        })
+    }
+
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         let token = self.advance()?;
         match token.token_type {
@@ -157,7 +163,7 @@ impl Parser {
     }
 
     fn new_expr(&self, kind: ExpressionKind) -> Expression {
-        Expression::new(kind, self.current_span)
+        Expression::new(kind, None, self.current_span)
     }
 
     fn new_stmt(&self, kind: StatementKind) -> Statement {
@@ -561,9 +567,21 @@ impl Parser {
                 self.new_expr(ExpressionKind::Constant(Const::Long(v)))
             },
             TokenType::OpenParen => {
-                let expression = self.parse_expression(0)?;
-                self.expect(TokenType::CloseParen)?;
-                expression
+                if self.next_token_is_type() {
+                    let mut types = Vec::new();
+                    while !self.next_token_is(TokenType::CloseParen) {
+                        types.push(self.advance()?.token_type);
+                    }
+                    let ctype = self.parse_types(&types)?;
+                    self.expect(TokenType::CloseParen)?;
+                    let factor = Box::new(self.parse_factor(None)?);
+                    let expression = self.new_expr(ExpressionKind::Cast(ctype, factor));
+                    expression
+                } else {
+                    let expression = self.parse_expression(0)?;
+                    self.expect(TokenType::CloseParen)?;
+                    expression
+                }
             },
             TokenType::Exclamation => self.parse_unop(UnaryOp::Not)?,
             TokenType::Tilde => self.parse_unop(UnaryOp::Complement)?,
