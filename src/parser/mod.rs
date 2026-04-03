@@ -20,7 +20,6 @@ pub enum ParseError {
     LabelWithoutStatement(Span),
     InvalidTypes(Span),
     InvalidStorageClasses(Span),
-    DuplicateTypes(Span),
     IntegerOverflow(Span),
 }
 
@@ -37,7 +36,6 @@ impl fmt::Display for ParseError {
             ParseError::LabelWithoutStatement(s) => write!(f, "Parse Error: label without statement!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::InvalidTypes(s) => write!(f, "Parse Error: invalid types!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::InvalidStorageClasses(s) => write!(f, "Parse Error: invalid storage classes!\nLine: {}, Col: {}", s.line_number, s.col),
-            ParseError::DuplicateTypes(s) => write!(f, "Parse Error: duplicate types!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::IntegerOverflow(s) => write!(f, "Parse Error: integer overflow!\nLine: {}, Col: {}", s.line_number, s.col),
         }
     }

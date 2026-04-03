@@ -1,5 +1,10 @@
 use crate::parser; 
-use crate::types::{IdentAttrs, InitialValue, SymbolTable};
+use crate::types::*;
+use crate::parser::Const;
+use crate::semanal::type_checker::{
+    get_static_init, 
+    convert_constant,
+};
 
 #[derive(Debug)]
 pub struct PoiseProg {
@@ -25,12 +30,15 @@ pub struct PoiseFunc {
 pub struct PoiseStaticVar {
     pub identifier: String, 
     pub global: bool, 
-    pub init: i32
+    pub datatype: Type,
+    pub init: StaticInit
 }
-        
+
 #[derive(Debug, Clone)]
 pub enum PoiseInstruction {
     Return(PoiseVal),
+    SignExtend{src: PoiseVal, dst: PoiseVal},
+    Truncate{src: PoiseVal, dst: PoiseVal},
     Unary{op: PoiseUnaryOp, src: PoiseVal, dst: PoiseVal},
     Binary{op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseVal},
     Copy{src: PoiseVal, dst:PoiseVal},
@@ -43,7 +51,7 @@ pub enum PoiseInstruction {
 
 #[derive(Debug, Clone)]
 pub enum PoiseVal {
-    Constant(i32),
+    Constant(Const),
     Variable(String),
 }
 
@@ -80,8 +88,9 @@ struct TmpCount {
 }
 
 impl TmpCount {
-    fn new_var(&mut self) -> PoiseVal {
+    fn new_var(&mut self, var_type: Type, symbols: &mut SymbolTable) -> PoiseVal {
         let name = format!("tmp.{}", self.var_counter);
+        symbols.insert(name.clone(), Symbol { ident: name.clone(), datatype: var_type, attrs: IdentAttrs::LocalAttr });
         self.var_counter += 1;
         PoiseVal::Variable(name)
     }
@@ -93,18 +102,22 @@ impl TmpCount {
     }
 }
 
+fn get_type(expr: &parser::Expression) -> Type {
+    expr.expression_type.as_ref().unwrap().clone()
+}
+
 fn loop_label_string(lab: String, labtype: &str) -> String {
     let ret = format!("{}_{}", labtype, lab);
     ret.into()
 }
 
-pub fn gen_poise(tree: &parser::Program, symbols: &SymbolTable) -> PoiseProg {
+pub fn gen_poise(tree: &parser::Program, symbols: &mut SymbolTable) -> PoiseProg {
     let mut count = TmpCount{var_counter: 0, label_counter: 0};
     let mut top_level_items = Vec::new();
     for decl in &tree.declarations {
         match decl {
             parser::Decl::FuncDecl(f) => if f.body.is_some() {
-                top_level_items.push(TopLevelItem::F(gen_poisefunc(f, &mut count, symbols)));
+                top_level_items.push(TopLevelItem::F(gen_poisefunc(f, symbols, &mut count)));
             },
             _ => {},
         }
@@ -113,12 +126,12 @@ pub fn gen_poise(tree: &parser::Program, symbols: &SymbolTable) -> PoiseProg {
     PoiseProg { top_level_items }
 }
 
-fn gen_poisefunc(func: &parser::FuncDeclaration, count: &mut TmpCount, symbols: &SymbolTable) -> PoiseFunc {
+fn gen_poisefunc(func: &parser::FuncDeclaration, symbols: &mut SymbolTable, count: &mut TmpCount) -> PoiseFunc {
     let mut instructions = Vec::new();
     let identifier = func.identifier.clone();
     let params = func.params.clone();
-    gen_inst_block(func.body.as_ref().unwrap(), &mut instructions, count, symbols);
-    instructions.push(PoiseInstruction::Return(PoiseVal::Constant(0)));
+    gen_inst_block(func.body.as_ref().unwrap(), &mut instructions, symbols, count);
+    instructions.push(PoiseInstruction::Return(PoiseVal::Constant(Const::Int(0))));
     let mut global = false;
     if let Some(sym) = symbols.get(&identifier) {
         global = sym.attrs.is_global()
@@ -126,50 +139,62 @@ fn gen_poisefunc(func: &parser::FuncDeclaration, count: &mut TmpCount, symbols: 
     PoiseFunc { identifier, global, params, body: instructions.to_vec() }
 }
 
-fn gen_inst_block(block: &parser::Block, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount, symbols: &SymbolTable) {
+fn gen_inst_block(
+    block: &parser::Block, 
+    instructions: &mut Vec<PoiseInstruction>, 
+    symbols: &mut SymbolTable,
+    count: &mut TmpCount) {
     for blockitem in &block.items {
         match blockitem {
-            parser::BlockItem::S(s) => gen_inst_statement(s, instructions, count, symbols),
-            parser::BlockItem::D(parser::Decl::VarDecl(d)) => gen_inst_var_declaration(d, instructions, count, symbols),
+            parser::BlockItem::S(s) => gen_inst_statement(s, instructions, symbols, count),
+            parser::BlockItem::D(parser::Decl::VarDecl(d)) => gen_inst_var_declaration(d, instructions, symbols, count),
             parser::BlockItem::D(parser::Decl::FuncDecl(_)) => {},
         }
     }
 }
 
-fn gen_inst_var_declaration(declaration: &parser::VarDeclaration, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount, symbols: &SymbolTable) {
+fn gen_inst_var_declaration(
+    declaration: &parser::VarDeclaration, 
+    instructions: &mut Vec<PoiseInstruction>, 
+    symbols: &mut SymbolTable,
+    count: &mut TmpCount) {
     if let Some(sym) = symbols.get(&declaration.identifier) {
         if matches!(sym.attrs, IdentAttrs::StaticAttr { .. }) {
             return;
         }
     }
     if let Some(exp) = declaration.init.as_ref() {
-        let val = emit_expression(exp, instructions, count);
+        let val = emit_expression(exp, instructions, symbols, count);
         instructions.push(PoiseInstruction::Copy { src: val, dst: PoiseVal::Variable(declaration.identifier.clone()) });
     }
 }
 
-fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<PoiseInstruction>, count: &mut TmpCount, symbols: &SymbolTable) {
+fn gen_inst_statement(
+    statement: &parser::Statement, 
+    instructions: &mut Vec<PoiseInstruction>, 
+    symbols: &mut SymbolTable,
+    count: &mut TmpCount) {
     match &statement.kind {
         parser::StatementKind::Return(expression) => {
-            let val = emit_expression(expression, instructions, count);
+            let val = emit_expression(expression, instructions, symbols, count);
             instructions.push(PoiseInstruction::Return(val));
         }
         parser::StatementKind::Expression(expression) => {
-            emit_expression(expression, instructions, count);
+            emit_expression(expression, instructions, symbols, count);
         }
         parser::StatementKind::Null => return,
         parser::StatementKind::If(c, y, n) => {
-            let cond = count.new_var();
-            let eval = emit_expression(c, instructions, count);
+            let cond = count.new_var(get_type(c), symbols);
+            let eval = emit_expression(c, instructions, symbols, count);
             let no_label = count.new_label_string();
             instructions.push(PoiseInstruction::Copy { src: eval, dst: cond.clone() });
             instructions.push(PoiseInstruction::JumpIfZero { condition: cond, identifier: no_label.clone() });
-            gen_inst_statement(y, instructions, count, symbols);
+            gen_inst_statement(y, instructions, symbols, count);
             if let Some(n) = n {
                 let yes_label = count.new_label_string();
                 instructions.push(PoiseInstruction::Jump(yes_label.clone()));
                 instructions.push(PoiseInstruction::Label(no_label));
-                gen_inst_statement(n, instructions, count, symbols);
+                gen_inst_statement(n, instructions, symbols, count);
                 instructions.push(PoiseInstruction::Label(yes_label));
             } else {
                 instructions.push(PoiseInstruction::Label(no_label));
@@ -177,55 +202,55 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
         },
         parser::StatementKind::Label(name, body) => {
             instructions.push(PoiseInstruction::Label(name.clone()));
-            gen_inst_statement(body, instructions, count, symbols);
+            gen_inst_statement(body, instructions, symbols, count);
         },
         parser::StatementKind::Goto(name) => instructions.push(PoiseInstruction::Jump(name.clone())),
-        parser::StatementKind::Compound(block) => gen_inst_block(block, instructions, count, symbols),
+        parser::StatementKind::Compound(block) => gen_inst_block(block, instructions, symbols, count),
         parser::StatementKind::Break(lab) => instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "break"))),
         parser::StatementKind::Continue(lab) => instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "cont"))),
         parser::StatementKind::DoWhile { body, cond, lab } => {
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "start")));
-            gen_inst_statement(body, instructions, count, symbols);
+            gen_inst_statement(body, instructions, symbols, count);
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
-            let res = emit_expression(cond, instructions, count);
+            let res = emit_expression(cond, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfNotZero { condition: res, identifier: loop_label_string(lab.clone(), "start") });
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
             
         },
         parser::StatementKind::While { cond, body, lab }  => {
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
-            let res = emit_expression(cond, instructions, count);
+            let res = emit_expression(cond, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfZero { condition: res, identifier: loop_label_string(lab.clone(), "break") });
-            gen_inst_statement(body, instructions, count, symbols);
+            gen_inst_statement(body, instructions, symbols, count);
             instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "cont")));
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
             
         },
         parser::StatementKind::For { init, cond, post, body, lab } => {
             if let parser::ForInit::InitExp(Some(exp)) = init {
-                emit_expression(exp, instructions, count);
+                emit_expression(exp, instructions, symbols, count);
             } else if let parser::ForInit::InitDec(dec) = init {
-                gen_inst_var_declaration(dec, instructions, count, symbols);
+                gen_inst_var_declaration(dec, instructions, symbols, count);
             }
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "start")));
             if let Some(cond) = cond {
-                let res = emit_expression(cond, instructions, count);
+                let res = emit_expression(cond, instructions, symbols, count);
                 instructions.push(PoiseInstruction::JumpIfZero { condition: res, identifier: loop_label_string(lab.clone(), "break") });
             }
-            gen_inst_statement(body, instructions, count, symbols);
+            gen_inst_statement(body, instructions, symbols, count);
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
             if let Some(post) = post {
-                emit_expression(post, instructions, count);
+                emit_expression(post, instructions, symbols, count);
             }
             instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "start")));
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
         },
         parser::StatementKind::Switch { scrutinee, body, lab, cases } => {
-            let scr = emit_expression(scrutinee, instructions, count);
+            let scr = emit_expression(scrutinee, instructions, symbols, count);
             for case in cases.clone() {
                 if let (Some(value), clab) = case {
-                    let caseval = emit_expression(&value, instructions, count);
-                    let cmp = count.new_var();
+                    let caseval = emit_expression(&value, instructions, symbols, count);
+                    let cmp = count.new_var(get_type(&value), symbols);
                     instructions.push(PoiseInstruction::Binary { op: PoiseBinaryOp::Equal, src1: caseval, src2: scr.clone(), dst: cmp.clone() });
                     instructions.push(PoiseInstruction::JumpIfNotZero { condition: cmp, identifier: loop_label_string(clab.clone(), "case") });
                 } 
@@ -236,7 +261,7 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
                 }
             }
             instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "break")));
-            gen_inst_statement(body, instructions, count, symbols);
+            gen_inst_statement(body, instructions, symbols, count);
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
         },
         parser::StatementKind::Case { lab,.. } => {
@@ -252,94 +277,109 @@ fn gen_inst_statement(statement: &parser::Statement, instructions: &mut Vec<Pois
 fn emit_expression(
     expr: &parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
+    symbols: &mut SymbolTable,
     count: &mut TmpCount) -> PoiseVal {
     match &expr.kind {
         parser::ExpressionKind::Constant(val) => PoiseVal::Constant(*val),
-        parser::ExpressionKind::Unary(op, inner) => emit_un_exp(op, inner, instructions, count),
-        parser::ExpressionKind::Binary(op, exp1, exp2) => emit_bin_exp(op, exp1, exp2, instructions, count),
+        parser::ExpressionKind::Unary(op, inner) => emit_un_exp(op, inner, instructions, symbols, count, get_type(expr)),
+        parser::ExpressionKind::Binary(op, exp1, exp2) => emit_bin_exp(op, exp1, exp2, instructions, symbols, count, get_type(expr)),
         parser::ExpressionKind::Var(name) => PoiseVal::Variable(name.clone()),
         parser::ExpressionKind::Assignment(lhs, rhs) => {
-            let result = emit_expression(rhs, instructions, count);
-            let dest = emit_expression(lhs, instructions, count);
+            let result = emit_expression(rhs, instructions, symbols, count);
+            let dest = emit_expression(lhs, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
             dest
         },
         parser::ExpressionKind::Conditional(c, y, n) => {
-            let cond = count.new_var();
-            let eval = emit_expression(c, instructions, count);
+            let cond = count.new_var(get_type(c), symbols);
+            let eval = emit_expression(c, instructions, symbols, count);
             let no_label = count.new_label_string();
             let yes_label = count.new_label_string();
-            let dest = count.new_var();
+            let dest = count.new_var(get_type(expr), symbols);
 
             instructions.push(PoiseInstruction::Copy { src: eval, dst: cond.clone() });
 
             instructions.push(PoiseInstruction::JumpIfZero { condition: cond, identifier: no_label.clone() });
-            let result = emit_expression(y, instructions, count);
+            let result = emit_expression(y, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
             instructions.push(PoiseInstruction::Jump(yes_label.clone()));
             instructions.push(PoiseInstruction::Label(no_label));
 
-            let result = emit_expression(n, instructions, count);
+            let result = emit_expression(n, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
             instructions.push(PoiseInstruction::Label(yes_label));
             dest
         },
         parser::ExpressionKind::PrefixIncrement(e) => {
-            let var = emit_expression(e, instructions, count);
+            let var = emit_expression(e, instructions, symbols, count);
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Add,
                 src1: var.clone(),
-                src2: PoiseVal::Constant(1),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
             var
         },
         parser::ExpressionKind::PrefixDecrement(e) => {
-            let var = emit_expression(e, instructions, count);
+            let var = emit_expression(e, instructions, symbols, count);
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Subtract,
                 src1: var.clone(),
-                src2: PoiseVal::Constant(1),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
             var
         },
         parser::ExpressionKind::PostfixIncrement(e) => {
-            let var = emit_expression(e, instructions, count);
-            let tmp = count.new_var();
+            let var = emit_expression(e, instructions, symbols, count);
+            let tmp = count.new_var(get_type(e), symbols);
             instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Add,
                 src1: var.clone(),
-                src2: PoiseVal::Constant(1),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
             tmp
         },
         parser::ExpressionKind::PostfixDecrement(e) => {
-            let var = emit_expression(e, instructions, count);
-            let tmp = count.new_var();
+            let var = emit_expression(e, instructions, symbols, count);
+            let tmp = count.new_var(get_type(e), symbols);
             instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Subtract,
                 src1: var.clone(),
-                src2: PoiseVal::Constant(1),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
             tmp
         },
         parser::ExpressionKind::FunctionCall(ident, args) => {
             let mut poiseargs = Vec::new();
-            let dst = count.new_var();
+            let dst = count.new_var(get_type(expr), symbols);
             for arg in args {
-                let exp = emit_expression(arg, instructions, count);
-                let tmp = count.new_var();
+                let exp = emit_expression(arg, instructions, symbols, count);
+                let tmp = count.new_var(get_type(arg), symbols);
                 instructions.push(PoiseInstruction::Copy { src: exp, dst: tmp.clone() });
                 poiseargs.push(tmp);
             }
             instructions.push(PoiseInstruction::FunctionCall { ident: ident.clone(), args: poiseargs, dst: dst.clone() });
             dst
-        }
+        },
+        parser::ExpressionKind::Cast(t, e) => {
+            let var = emit_expression(e, instructions, symbols, count);
+            if *t == get_type(e) {
+                var
+            } else {
+                let dst = count.new_var(t.clone(), symbols);
+                match *t {
+                    Type::Long => instructions.push(PoiseInstruction::SignExtend { src: var, dst: dst.clone() }),
+                    Type::Int => instructions.push(PoiseInstruction::Truncate { src: var, dst: dst.clone() }),
+                    _ => unreachable!(),
+                }
+                dst
+            }
+        },
     }
 }
 
@@ -347,10 +387,12 @@ fn emit_bin_exp(op: &parser::BinaryOp,
     exp1: &parser::Expression,
     exp2: &parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
-    count: &mut TmpCount) -> PoiseVal {
+    symbols: &mut SymbolTable,
+    count: &mut TmpCount,
+    dest_type: Type) -> PoiseVal {
         let binop = match op {
             parser::BinaryOp::LogicalAnd | parser::BinaryOp::LogicalOr => {
-                return emit_short_circuit_exp(op, exp1, exp2, instructions, count);
+                return emit_short_circuit_exp(op, exp1, exp2, instructions, symbols, count);
             },
             parser::BinaryOp::Add => PoiseBinaryOp::Add,
             parser::BinaryOp::Subtract => PoiseBinaryOp::Subtract,
@@ -370,9 +412,9 @@ fn emit_bin_exp(op: &parser::BinaryOp,
             parser::BinaryOp::GreaterOrEqual => PoiseBinaryOp::GreaterOrEqual,
             _ => unreachable!()
         };
-        let v1 = emit_expression(exp1, instructions, count);
-        let v2 = emit_expression(exp2, instructions, count);
-        let dst = count.new_var();
+        let v1 = emit_expression(exp1, instructions, symbols, count);
+        let v2 = emit_expression(exp2, instructions, symbols, count);
+        let dst = count.new_var(dest_type, symbols);
         instructions.push(PoiseInstruction::Binary {op: binop, src1: v1, src2: v2, dst: dst.clone() });
         dst
 }
@@ -380,9 +422,11 @@ fn emit_bin_exp(op: &parser::BinaryOp,
 fn emit_un_exp(op: &parser::UnaryOp,
     exp: &parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
-    count: &mut TmpCount) -> PoiseVal {
-        let src = emit_expression(exp, instructions, count);
-        let dst = count.new_var();
+    symbols: &mut SymbolTable,
+    count: &mut TmpCount,
+    dest_type: Type) -> PoiseVal {
+        let src = emit_expression(exp, instructions, symbols, count);
+        let dst = count.new_var(dest_type, symbols);
         let unary_op = match op {
             parser::UnaryOp::Negate => PoiseUnaryOp::Negate,
             parser::UnaryOp::Complement => PoiseUnaryOp::Complement,
@@ -396,42 +440,43 @@ fn emit_short_circuit_exp(op: &parser::BinaryOp,
     exp1: &parser::Expression,
     exp2: &parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
+    symbols: &mut SymbolTable,
     count: &mut TmpCount) -> PoiseVal {
 
     let false_label = count.new_label_string();
     let true_label = count.new_label_string();
-    let dst = count.new_var();
+    let dst = count.new_var(Type::Int, symbols);
 
     match op {
         parser::BinaryOp::LogicalAnd => {
-            let v1 = emit_expression(exp1, instructions, count);
+            let v1 = emit_expression(exp1, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy{src: v1.clone(), dst: dst.clone()});
             instructions.push(PoiseInstruction::JumpIfZero { condition: dst.clone(), identifier: false_label.clone() });
 
-            let v2 = emit_expression(exp2, instructions, count);
+            let v2 = emit_expression(exp2, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy{src: v2.clone(), dst: dst.clone()});
             instructions.push(PoiseInstruction::JumpIfZero { condition: dst.clone(), identifier: false_label.clone() });
 
-            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(1), dst: dst.clone()});
+            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(1)), dst: dst.clone()});
             instructions.push(PoiseInstruction::Jump(true_label.clone()));
             instructions.push(PoiseInstruction::Label(false_label));
-            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(0), dst: dst.clone() });
+            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(0)), dst: dst.clone() });
             instructions.push(PoiseInstruction::Label(true_label));
             dst
         },
         parser::BinaryOp::LogicalOr => {
-            let v1 = emit_expression(exp1, instructions, count);
+            let v1 = emit_expression(exp1, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy{src: v1.clone(), dst: dst.clone()});
             instructions.push(PoiseInstruction::JumpIfNotZero { condition: dst.clone(), identifier: true_label.clone() });
 
-            let v2 = emit_expression(exp2, instructions, count);
+            let v2 = emit_expression(exp2, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy{src: v2.clone(), dst: dst.clone()});
             instructions.push(PoiseInstruction::JumpIfNotZero { condition: dst.clone(), identifier: true_label.clone() });
 
-            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(0), dst: dst.clone()});
+            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(0)), dst: dst.clone()});
             instructions.push(PoiseInstruction::Jump(false_label.clone()));
             instructions.push(PoiseInstruction::Label(true_label));
-            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(1), dst: dst.clone() });
+            instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(1)), dst: dst.clone() });
             instructions.push(PoiseInstruction::Label(false_label));
             dst
         },
@@ -442,10 +487,24 @@ fn emit_short_circuit_exp(op: &parser::BinaryOp,
 fn gen_static_symbols(symbols: &SymbolTable) -> Vec<TopLevelItem> {
     let mut defs = Vec::new();
     for (k, v) in symbols {
+        let var_type = &v.datatype;
         if let IdentAttrs::StaticAttr { init, global } = &v.attrs {
             match init {
-                InitialValue::Initial(v) => defs.push(TopLevelItem::V(PoiseStaticVar { identifier: k.clone(), global:*global, init: *v })),
-                InitialValue::Tentative => defs.push(TopLevelItem::V(PoiseStaticVar { identifier: k.clone(), global:*global, init: 0 })),
+                InitialValue::Initial(v) => defs.push(TopLevelItem::V(PoiseStaticVar { 
+                    identifier: k.clone(), 
+                    datatype: var_type.clone(),
+                    global:*global, 
+                    init: v.clone() 
+                })),
+                InitialValue::Tentative => {
+                    let val = convert_constant(Const::Int(0), var_type.clone());
+                    defs.push(TopLevelItem::V(PoiseStaticVar { 
+                        identifier: k.clone(), 
+                        datatype: var_type.clone(),
+                        global:*global, 
+                        init: get_static_init(val) 
+                    }));
+                },
                 InitialValue::NoInitializer => {}
             }
         }

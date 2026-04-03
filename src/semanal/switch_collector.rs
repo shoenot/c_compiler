@@ -43,7 +43,7 @@ fn collect_cases_in_block(items: &mut Vec<BlockItem>) -> Result<Vec<(Option<Expr
             BlockItem::S(stmt) => match &mut stmt.kind {
                 StatementKind::Case { expr, lab } => {
                     match eval_constant(expr) {
-                        Some(value) => **expr = ExpressionKind::Constant(value),
+                        Some(value) => **expr = ExpressionKind::Constant(Const::Long(value)),
                         None => return Err(SemanticError::NonConstantCase(expr.span)),
                     }
                     cases.push((Some(expr.clone()), lab.clone()));
@@ -100,15 +100,18 @@ fn check_block_for_decs(block: Block) -> Result<(), SemanticError> {
     Ok(())
 }
 
-fn eval_constant(expr: &ExpressionKind) -> Option<i32> {
+fn eval_constant(expr: &ExpressionKind) -> Option<i64> {
     match expr {
-        ExpressionKind::Constant(n) => Some(*n),
+        ExpressionKind::Constant(c) =>  match c {
+            Const::Int(i)  => Some(*i as i64), 
+            Const::Long(i) => Some(*i as i64),
+        }
         ExpressionKind::Unary(op, expr) => {
             let val = eval_constant(expr)?;
             match op {
                 UnaryOp::Negate => Some(-val),
                 UnaryOp::Complement => Some(!val),
-                UnaryOp::Not => Some((val == 0) as i32),
+                UnaryOp::Not => Some((val == 0) as i64),
             }
         },
         ExpressionKind::Binary(op, left, right) => {
@@ -122,17 +125,17 @@ fn eval_constant(expr: &ExpressionKind) -> Option<i32> {
                 BinaryOp::Remainder       => if r == 0 { None } else { Some(l % r) },
                 BinaryOp::LeftShift       => Some(l << r),
                 BinaryOp::RightShift      => Some(l >> r),
-                BinaryOp::LessThan        => Some((l < r) as i32),
-                BinaryOp::LessOrEqual     => Some((l <= r) as i32),
-                BinaryOp::GreaterThan     => Some((l > r) as i32),
-                BinaryOp::GreaterOrEqual  => Some((l >= r) as i32),
-                BinaryOp::Equal           => Some((l == r) as i32),
-                BinaryOp::NotEqual        => Some((l != r) as i32),
+                BinaryOp::LessThan        => Some((l < r) as i64),
+                BinaryOp::LessOrEqual     => Some((l <= r) as i64),
+                BinaryOp::GreaterThan     => Some((l > r) as i64),
+                BinaryOp::GreaterOrEqual  => Some((l >= r) as i64),
+                BinaryOp::Equal           => Some((l == r) as i64),
+                BinaryOp::NotEqual        => Some((l != r) as i64),
                 BinaryOp::BitwiseAnd      => Some(l & r),
                 BinaryOp::BitwiseXor      => Some(l ^ r),
                 BinaryOp::BitwiseOr       => Some(l | r),
-                BinaryOp::LogicalAnd      => Some((l != 0 && r != 0) as i32),
-                BinaryOp::LogicalOr       => Some((l != 0 || r != 0) as i32),
+                BinaryOp::LogicalAnd      => Some((l != 0 && r != 0) as i64),
+                BinaryOp::LogicalOr       => Some((l != 0 || r != 0) as i64),
                 _ => None,
             }
         },

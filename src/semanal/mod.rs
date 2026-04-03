@@ -16,7 +16,7 @@ use switch_collector::*;
 mod loop_labeler;
 use loop_labeler::*;
 
-mod type_checker;
+pub mod type_checker;
 pub use type_checker::*;
 
 mod label_mangler;

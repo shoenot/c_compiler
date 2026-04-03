@@ -26,8 +26,14 @@ pub enum IdentAttrs {
 #[derive(Debug, Clone, PartialEq)]
 pub enum InitialValue {
     Tentative,
-    Initial(i32),
+    Initial(StaticInit),
     NoInitializer,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StaticInit {
+    IntInit(i32),
+    LongInit(i64),
 }
 
 impl IdentAttrs {

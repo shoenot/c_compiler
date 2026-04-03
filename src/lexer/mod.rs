@@ -5,14 +5,13 @@ pub mod tokens;
 pub use tokens::TokenType;
 
 #[derive(Debug)]
-pub enum LexerError { IntegerOverflow(Span),
+pub enum LexerError { 
     InvalidCharacter(char, Span),
 }
 
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            LexerError::IntegerOverflow(s) => write!(f, "Lexer Error: int overflow! \nLine: {}, Col: {}", s.line_number, s.col),
             LexerError::InvalidCharacter(c, s) => write!(f, "Lexer Error: invalid character! {}\nLine: {}, Col: {}", c, s.line_number, s.col),
         }
     }

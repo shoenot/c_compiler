@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 use crate::codegen::*;
 use crate::types::*;
 
@@ -24,7 +24,23 @@ enum CondOp {
     Set,
 }
 
-pub fn emit_program(program: AsmProgram, symbols: &mut SymbolTable)-> Result<String, EmissionError> {
+impl AsmType {
+    fn suffix(&self) -> &'static str {
+        match self {
+            AsmType::Byte => "b",
+            AsmType::Longword => "l",
+            AsmType::Quadword => "q",
+        }
+    }
+}
+
+impl fmt::Display for AsmType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.suffix())
+    }
+}
+
+pub fn emit_program(program: AsmProgram, symbols: &mut AsmSymbolTable)-> Result<String, EmissionError> {
     let mut output = String::new();
     for item in program.top_level {
         match item {
@@ -36,25 +52,27 @@ pub fn emit_program(program: AsmProgram, symbols: &mut SymbolTable)-> Result<Str
     Ok(output)
 }
 
+fn emit_staticinit(init: StaticInit) -> String {
+    match init {
+        StaticInit::IntInit(0) => String::from(".zero 4"),
+        StaticInit::IntInit(i) => String::from(format!(".long {}", i)),
+        StaticInit::LongInit(0) => String::from(".zero 8"),
+        StaticInit::LongInit(i) => String::from(format!(".quad {}", i)),
+    }
+}
+
 fn emit_var(var: AsmStaticVar, output: &mut String) -> Result<(), EmissionError> {
     if var.global {
         output.push_str(&format!("\t.globl {}\n", var.identifier));
     }
-    if var.init == 0 {
-        output.push_str("\t.bss\n");
-        output.push_str("\t.align 4\n");
-        output.push_str(&format!("{}:\n", var.identifier));
-        output.push_str("\t.zero 4\n");
-    } else {
-        output.push_str("\t.data\n");
-        output.push_str("\t.align 4\n");
-        output.push_str(&format!("{}:\n", var.identifier));
-        output.push_str(&format!("\t.long {}\n", var.init));
-    }
+    output.push_str("\t.data\n");
+    output.push_str(&format!("\t.align {}\n", var.alignment));
+    output.push_str(&format!("{}:\n", var.identifier));
+    output.push_str(&format!("\t{}\n", emit_staticinit(var.init)));
     Ok(())
 }
 
-fn emit_function(function: AsmFunction, output: &mut String, symbols: &mut HashMap<String, Symbol>) -> Result<(), EmissionError> {
+fn emit_function(function: AsmFunction, output: &mut String, symbols: &mut AsmSymbolTable) -> Result<(), EmissionError> {
     if function.global {
         output.push_str(&format!("\t.globl {}\n", function.identifier));
     }
@@ -68,33 +86,33 @@ fn emit_function(function: AsmFunction, output: &mut String, symbols: &mut HashM
     Ok(())
 }
 
-
-fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &mut HashMap<String, Symbol>) -> Result<(), EmissionError> {
+fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &mut AsmSymbolTable) -> Result<(), EmissionError> {
     match instruction {
-        AsmInstruction::Mov(src, dst) => { let src = emit_operand(src)?;
-            let dst = emit_operand(dst)?;
-            output.push_str(&format!("\tmovl\t{src},\t{dst}\n"));
-        },
-        AsmInstruction::Movb(src, dst) => {
+        AsmInstruction::Mov(t, src, dst) => { 
             let src = emit_operand(src)?;
             let dst = emit_operand(dst)?;
-            output.push_str(&format!("\tmovb\t{src},\t{dst}\n"));
+            output.push_str(&format!("\tmov{}\t{src},\t{dst}\n", t.suffix()));
         },
-        AsmInstruction::Unary(unary_op, operand) => {
+        AsmInstruction::Movsx(src, dst) => { 
+            let src = emit_operand(src)?;
+            let dst = emit_operand(dst)?;
+            output.push_str(&format!("\tmovslq\t{src},\t{dst}\n"));
+        },
+        AsmInstruction::Unary(unary_op, t, operand) => {
             let dst = emit_operand(operand)?;
             let op = emit_unary_op(unary_op);
-            output.push_str(&format!("\t{op}\t{dst}\n"));
+            output.push_str(&format!("\t{op}{}\t{dst}\n", t.suffix()));
         },
-        AsmInstruction::Binary(binary_op, operand1, operand2) => {
+        AsmInstruction::Binary(binary_op, t, operand1, operand2) => {
             let src = emit_operand(operand1)?;
             let dst = emit_operand(operand2)?;
             let op = emit_binary_op(binary_op);
-            output.push_str(&format!("\t{op}\t{src},\t{dst}\n"));
+            output.push_str(&format!("\t{op}{}\t{src},\t{dst}\n", t.suffix()));
         },
-        AsmInstruction::Cmp(operand1, operand2) => {
+        AsmInstruction::Cmp(t, operand1, operand2) => {
             let src = emit_operand(operand1)?;
             let dst = emit_operand(operand2)?;
-            output.push_str(&format!("\tcmpl\t{src},\t{dst}\n"));
+            output.push_str(&format!("\tcmp{}\t{src},\t{dst}\n", t.suffix()));
         },
         AsmInstruction::SetCC(cond_code, dst) => {
             let op = emit_conditional_op(CondOp::Set, cond_code);
@@ -107,12 +125,18 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
         }
         AsmInstruction::Jmp(label) => output.push_str(&format!("\tjmp\t.L{label}\n")),
         AsmInstruction::Label(label) => output.push_str(&format!(".L{label}:\n")),
-        AsmInstruction::Idiv(operand) => {
+        AsmInstruction::Idiv(t, operand) => {
             let op = emit_operand(operand)?;
-            output.push_str(&format!("\tidivl\t{op}\n"));
+            output.push_str(&format!("\tidiv{}\t{op}\n", t.suffix()));
         },
-        AsmInstruction::Cdq => {
-            output.push_str("\tcdq\n");
+        AsmInstruction::Cdq(AsmType::Byte) => {
+            output.push_str("\tcbtw\n");
+        },
+        AsmInstruction::Cdq(AsmType::Longword) => {
+            output.push_str("\tcltd\n");
+        },
+        AsmInstruction::Cdq(AsmType::Quadword) => {
+            output.push_str("\tcqto\n");
         },
         AsmInstruction::Ret => {
             output.push_str("\tmovq\t%rbp,\t%rsp\n");
@@ -125,20 +149,11 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
         },
         AsmInstruction::Call(id) => {
             let mut name = id.clone();
-            if let Some(sym) = symbols.get(&id) {
-                if let IdentAttrs::FuncAttr { defined:_, global } = sym.attrs {
-                    if !global {
-                        name.push_str("@PLT");
-                    }
-                }
+            let Some(AsmSymbol::FuncEntry(global)) = symbols.get(&id) else { unreachable!() };
+            if !global {
+                name.push_str("@PLT");
             }
             output.push_str(&format!("\tcall\t{name}\n"));
-        },
-        AsmInstruction::AllocateStack(int) => {
-            output.push_str(&format!("\tsubq\t${int},\t%rsp\n"));
-        },
-        AsmInstruction::DeallocateStack(int) => {
-            output.push_str(&format!("\taddq\t${int},\t%rsp\n"));
         },
     }
     Ok(())
@@ -175,6 +190,7 @@ fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
                 Register::R9 => ["r9b", "r9d", "r9"][n],
                 Register::R10 => ["r10b", "r10d", "r10"][n],
                 Register::R11 => ["r11b", "r11d", "r11"][n],
+                Register::SP => "rsp",
             };
             Ok(format!("%{rstr}"))
         },
@@ -186,20 +202,20 @@ fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
 
 fn emit_unary_op(unary_op: UnaryOp) -> &'static str  {
     match unary_op {
-        UnaryOp::Neg => "negl",
-        UnaryOp::Not => "notl",
+        UnaryOp::Neg => "neg",
+        UnaryOp::Not => "not",
     }
 }
 
 fn emit_binary_op(binary_op: BinaryOp) -> &'static str {
     match binary_op {
-        BinaryOp::Add => "addl",
-        BinaryOp::Sub => "subl",
-        BinaryOp::Mult => "imull",
-        BinaryOp::Sal => "sall",
-        BinaryOp::Sar => "sarl",
-        BinaryOp::BitAnd => "andl",
-        BinaryOp::BitOr => "orl",
-        BinaryOp::BitXor => "xorl",
+        BinaryOp::Add       => "add",
+        BinaryOp::Sub       => "sub",
+        BinaryOp::Mult      => "imul",
+        BinaryOp::Sal       => "sal",
+        BinaryOp::Sar       => "sar",
+        BinaryOp::BitAnd    => "and",
+        BinaryOp::BitOr     => "or",
+        BinaryOp::BitXor    => "xor",
     }
 }
