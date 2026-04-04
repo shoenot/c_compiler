@@ -88,7 +88,7 @@ pub fn semantic_analysis(program: &mut Program, symbols: &mut HashMap<String, Sy
     let map = identifier_resolution_pass(program)?;
     label_mangling_pass(program)?;
     loop_labeling_pass(program)?;
-    switch_collection_pass(program)?;
     type_checking_pass(program, symbols)?;
+    switch_collection_pass(program)?;
     Ok(map)
 }

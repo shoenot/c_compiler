@@ -7,13 +7,18 @@ struct SwitchCollector;
 impl Visitor for SwitchCollector {
     fn visit_statement(&mut self, statement: &mut Statement) -> Result<(), SemanticError> {
         match &mut statement.kind {
-            StatementKind::Switch { cases, body, .. } => {
-                *cases = collect_switch_cases(body)?;
+            StatementKind::Switch { cases, body, scrutinee, .. } => {
+                let scrutinee_type = scrutinee.expression_type.as_ref().unwrap().clone();
+                *cases = collect_switch_cases(body, &scrutinee_type)?;
 
-                let mut seen = HashSet::new();
+                let mut seen: HashSet<i64> = HashSet::new();
                 for expr in cases.iter().filter_map(|(opt, _)| opt.as_ref()) {
                     if let ExpressionKind::Constant(value) = &expr.kind {
-                        if !seen.insert(value) {
+                        let key = match value {
+                            Const::Int(i) => *i as i64,
+                            Const::Long(i) => *i,
+                        };
+                        if !seen.insert(key) {
                             return Err(SemanticError::DuplicateCase(statement.span));
                         }
                     }
@@ -36,14 +41,22 @@ impl Visitor for SwitchCollector {
     }
 }
 
-fn collect_cases_in_block(items: &mut Vec<BlockItem>) -> Result<Vec<(Option<Expression>, String)>, SemanticError> {
+fn collect_cases_in_block(items: &mut Vec<BlockItem>, scrutinee_type: &Type) -> Result<Vec<(Option<Expression>, String)>, SemanticError> {
     let mut cases = Vec::new();
     for item in items.iter_mut() {
         match item {
             BlockItem::S(stmt) => match &mut stmt.kind {
                 StatementKind::Case { expr, lab } => {
-                    match eval_constant(expr) {
-                        Some(value) => **expr = ExpressionKind::Constant(Const::Long(value)),
+                    match eval_constant(&expr.kind) {
+                        Some(value) => {
+                            let truncated = match scrutinee_type {
+                                Type::Int => Const::Int(value as i32),
+                                Type::Long => Const::Long(value),
+                                _ => unreachable!(),
+                            };
+                            **expr = ExpressionKind::Constant(truncated);
+                            expr.expression_type = Some(scrutinee_type.clone());
+                        },
                         None => return Err(SemanticError::NonConstantCase(expr.span)),
                     }
                     cases.push((Some(expr.clone()), lab.clone()));
@@ -52,21 +65,21 @@ fn collect_cases_in_block(items: &mut Vec<BlockItem>) -> Result<Vec<(Option<Expr
                     cases.push((None, lab.clone()));
                 },
                 StatementKind::Compound(bl) => {
-                    cases.append(&mut collect_cases_in_block(&mut bl.items)?);
+                    cases.append(&mut collect_cases_in_block(&mut bl.items, scrutinee_type)?);
                 },
                 StatementKind::If(_, yes, no) => {
-                    cases.append(&mut collect_switch_cases(yes.as_mut())?);
+                    cases.append(&mut collect_switch_cases(yes.as_mut(), scrutinee_type)?);
                     if let Some(no) = no {
-                        cases.append(&mut collect_switch_cases(no.as_mut())?);
+                        cases.append(&mut collect_switch_cases(no.as_mut(), scrutinee_type)?);
                     }
                 },
                 StatementKind::Label(_, body) => {
-                    cases.append(&mut collect_switch_cases(body.as_mut())?);
+                    cases.append(&mut collect_switch_cases(body.as_mut(), scrutinee_type)?);
                 },
                 StatementKind::For { body, .. } |
                 StatementKind::While { body, .. } |
                 StatementKind::DoWhile { body, .. } => {
-                    cases.append(&mut collect_switch_cases(body.as_mut())?);
+                    cases.append(&mut collect_switch_cases(body.as_mut(), scrutinee_type)?);
                 },
                 _ => {}, 
             },
@@ -76,10 +89,10 @@ fn collect_cases_in_block(items: &mut Vec<BlockItem>) -> Result<Vec<(Option<Expr
     Ok(cases)
 }
 
-fn collect_switch_cases(st: &mut Statement) -> Result<Vec<(Option<Expression>, String)>, SemanticError> {
+fn collect_switch_cases(st: &mut Statement, scrutinee_type: &Type) -> Result<Vec<(Option<Expression>, String)>, SemanticError> {
     let mut cases = Vec::new();
     if let StatementKind::Compound(block) = &mut st.kind {
-        cases.append(&mut collect_cases_in_block(&mut block.items)?);
+        cases.append(&mut collect_cases_in_block(&mut block.items, scrutinee_type)?);
     } else if let StatementKind::Case { expr, lab } = &mut st.kind {
         cases.push((Some(expr.clone()), lab.clone()));
     } else if let StatementKind::Default { lab } = &mut st.kind {

@@ -190,13 +190,16 @@ impl<'a> TypeChecker<'a> {
                 if matches!(op, BinaryOp::LogicalOr | BinaryOp::LogicalAnd ) {
                     Ok(set_type(expr, Type::Int))
                 } else {
-                    let common_type = get_common_type(exp1_type, exp2_type);
+                    let common_type = get_common_type(exp1_type.clone(), exp2_type.clone());
                     convert_type(exp1, common_type.clone());
                     convert_type(exp2, common_type.clone());
                     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual |
                                     BinaryOp::GreaterThan | BinaryOp::LessThan |
                                     BinaryOp::GreaterOrEqual | BinaryOp::LessOrEqual) {
                         Ok(set_type(expr, Type::Int))
+                    } else if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
+                        convert_type(exp2, get_common_type(exp1_type.clone(), exp2_type));
+                        Ok(set_type(expr, exp1_type))
                     } else {
                         Ok(set_type(expr, common_type))
                     }

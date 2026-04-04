@@ -140,17 +140,19 @@ fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction
                 let mut v2_scratch = false;
                 if let Operand::Imm(v) = v1.clone() {
                    if i32::try_from(v).is_err() {
-                       new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, v1.clone(), Operand::Reg(Register::R10, RegSize::Quad)));
+                       new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, v1, Operand::Reg(Register::R10, RegSize::Quad)));
                        v1_scratch = true
                    }
                 }
-                if let Operand::Imm(_) = v2.clone() {
-                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v2.clone(), Operand::Reg(Register::R11, regsize.clone())));
+                if let Operand::Imm(v) = v2.clone() {
+                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v2, Operand::Reg(Register::R11, regsize.clone())));
                        v2_scratch = true
                 }
                 match (&v1, &v2) {
                    (Operand::Stack(_) | Operand::Data(_), Operand::Stack(_) | Operand::Data(_)) => {
-                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v2.clone(), Operand::Reg(Register::R11, regsize.clone())));
+                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v1, Operand::Reg(Register::R10, regsize.clone())));
+                       v1_scratch = true;
+                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v2, Operand::Reg(Register::R11, regsize.clone())));
                        v2_scratch = true;
                    },
                    _ => {},

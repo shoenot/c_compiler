@@ -165,6 +165,19 @@ fn gen_inst_var_declaration(
     }
     if let Some(exp) = declaration.init.as_ref() {
         let val = emit_expression(exp, instructions, symbols, count);
+        let src_type = get_type(exp);
+        let dst_type = symbols.get(&declaration.identifier).unwrap().datatype.clone();
+        let val = if src_type != dst_type {
+            let tmp = count.new_var(dst_type.clone(), symbols);
+            match dst_type {
+                Type::Long => instructions.push(PoiseInstruction::SignExtend { src: val, dst: tmp.clone() }),
+                Type::Int => instructions.push(PoiseInstruction::Truncate { src: val, dst: tmp.clone() }),
+                _ => unreachable!(),
+            }
+            tmp
+        } else {
+            val
+        };
         instructions.push(PoiseInstruction::Copy { src: val, dst: PoiseVal::Variable(declaration.identifier.clone()) });
     }
 }

@@ -165,7 +165,6 @@ pub fn run_compiler(input_file: &Path, args: crate::Args) -> Result<PathBuf, Box
     run_semanal(&mut parsed, &mut symbols, &args)?;
     let poise = run_poise(parsed, &mut symbols, &args);
     let asm = run_codegen(poise, &mut symbols, &mut asm_symbols, &args);
-    println!("{:?}", asm_symbols);
 
     let mut output_file = input_file.to_path_buf();
     output_file.set_extension("s");

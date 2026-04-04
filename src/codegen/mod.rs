@@ -348,14 +348,15 @@ fn unary_handler(
     let srct = get_asmtype(symbols, &src);
     let dstt = get_asmtype(symbols, &dst);
     let (s, d) = (gen_operand(src), gen_operand(dst));
-    generated.push(AsmInstruction::Mov(srct.clone(), s.clone(), d.clone()));
     match op {
-        poise::PoiseUnaryOp::Negate => generated.push(AsmInstruction::Unary(UnaryOp::Neg, 
-                                                                            srct.clone(), 
-                                                                            d)),
-        poise::PoiseUnaryOp::Complement => generated.push(AsmInstruction::Unary(UnaryOp::Not, 
-                                                                                srct.clone(),
-                                                                                d)),
+        poise::PoiseUnaryOp::Negate => {
+            generated.push(AsmInstruction::Mov(srct.clone(), s.clone(), d.clone()));
+            generated.push(AsmInstruction::Unary(UnaryOp::Neg, srct.clone(), d))
+        }
+        poise::PoiseUnaryOp::Complement => { 
+            generated.push(AsmInstruction::Mov(srct.clone(), s.clone(), d.clone()));
+            generated.push(AsmInstruction::Unary(UnaryOp::Not, srct.clone(), d))
+        }
         poise::PoiseUnaryOp::Not => {
             generated.push(AsmInstruction::Cmp(srct, Operand::Imm(0), s));
             generated.push(AsmInstruction::Mov(dstt, Operand::Imm(0), d.clone()));
