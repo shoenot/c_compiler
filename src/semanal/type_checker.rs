@@ -2,7 +2,6 @@ use std::iter::zip;
 
 use super::*;
 use visitor_trait::*;
-use crate::types::Type;
 
 impl Symbol {
     fn new_func(ident: String, ftype: Type, defined: bool, global: bool) -> Symbol {
@@ -28,22 +27,12 @@ fn set_type(expr: &mut Expression, expression_type: Type) -> Type {
     expression_type
 }
 
-fn get_s_u_type(ut: Type, st: Type) -> Type {
-    if 
-}
-
 fn get_common_type(t1: Type, t2: Type) -> Type {
     if t1 == t2 {
         t1
-    } else if (t1.is_signed() == t2.is_signed()) {
-        if t1 > t2 { t1 } else { t2 }
-    } else if (t1.is_signed() != t2.is_signed()) {
-        let (ut, st) = if t1.is_signed() { (t2, t1) } else { (t1, t2) };
-        if ut.rank() >= st.rank() {
-            ut
-        } else 
-    }
-        
+    } else if t1.size() == t2.size() {
+        if t1.is_signed() { t2 } else { t1 }
+    } else if t1.size() > t2.size() { t1 } else { t2 }
 }
 
 fn convert_type(expr: &mut Expression, datatype: Type) {
@@ -57,6 +46,8 @@ pub fn get_static_init(constant: Const) -> StaticInit {
     match constant {
         Const::Long(i) => StaticInit::LongInit(i),
         Const::Int(i) => StaticInit::IntInit(i),
+        Const::UInt(i) => StaticInit::UIntInit(i),
+        Const::ULong(i) => StaticInit::ULongInit(i),
     }
 }
 
@@ -64,6 +55,14 @@ pub fn convert_constant(constant: Const, into: Type) -> Const {
     match (constant, into) {
         (Const::Int(i), Type::Long) => Const::Long(i as i64),
         (Const::Long(i), Type::Int) => Const::Int(i as i32),
+        (Const::Int(i), Type::UInt) => Const::UInt(i as u32),
+        (Const::Int(i), Type::ULong) => Const::ULong(i as u64),
+        (Const::Long(i), Type::UInt) => Const::UInt(i as u32),
+        (Const::Long(i), Type::ULong) => Const::ULong(i as u64),
+        (Const::UInt(i), Type::Int) => Const::Int(i as i32),
+        (Const::UInt(i), Type::Long) => Const::Long(i as i64),
+        (Const::ULong(i), Type::Int) => Const::Int(i as i32),
+        (Const::ULong(i), Type::Long) => Const::Long(i as i64),
         (c, _) => c,
     }
 }
@@ -179,6 +178,8 @@ impl<'a> TypeChecker<'a> {
                 match c {
                     Const::Int(_) => Ok(set_type(expr, Type::Int)),
                     Const::Long(_) => Ok(set_type(expr, Type::Long)),
+                    Const::UInt(_) => Ok(set_type(expr, Type::UInt)),
+                    Const::ULong(_) => Ok(set_type(expr, Type::ULong)),
                 }
             },
             ExpressionKind::Cast(t, factor) => {
@@ -201,14 +202,15 @@ impl<'a> TypeChecker<'a> {
                     Ok(set_type(expr, Type::Int))
                 } else {
                     let common_type = get_common_type(exp1_type.clone(), exp2_type.clone());
-                    convert_type(exp1, common_type.clone());
-                    convert_type(exp2, common_type.clone());
+                    if !matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift ) {
+                        convert_type(exp1, common_type.clone());
+                        convert_type(exp2, common_type.clone());
+                    }
                     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual |
                                     BinaryOp::GreaterThan | BinaryOp::LessThan |
                                     BinaryOp::GreaterOrEqual | BinaryOp::LessOrEqual) {
                         Ok(set_type(expr, Type::Int))
                     } else if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
-                        convert_type(exp2, get_common_type(exp1_type.clone(), exp2_type));
                         Ok(set_type(expr, exp1_type))
                     } else {
                         Ok(set_type(expr, common_type))

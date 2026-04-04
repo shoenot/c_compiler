@@ -58,6 +58,10 @@ fn emit_staticinit(init: StaticInit) -> String {
         StaticInit::IntInit(i) => String::from(format!(".long {}", i)),
         StaticInit::LongInit(0) => String::from(".zero 8"),
         StaticInit::LongInit(i) => String::from(format!(".quad {}", i)),
+        StaticInit::UIntInit(0) => String::from(".zero 4"),
+        StaticInit::UIntInit(i) => String::from(format!(".long {}", i)),
+        StaticInit::ULongInit(0) => String::from(".zero 8"),
+        StaticInit::ULongInit(i) => String::from(format!(".quad {}", i)),
     }
 }
 
@@ -129,6 +133,10 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
             let op = emit_operand(operand)?;
             output.push_str(&format!("\tidiv{}\t{op}\n", t.suffix()));
         },
+        AsmInstruction::Div(t, operand) => {
+            let op = emit_operand(operand)?;
+            output.push_str(&format!("\tdiv{}\t{op}\n", t.suffix()));
+        },
         AsmInstruction::Cdq(AsmType::Byte) => {
             output.push_str("\tcbtw\n");
         },
@@ -155,6 +163,7 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
             }
             output.push_str(&format!("\tcall\t{name}\n"));
         },
+        _ => unreachable!(),
     }
     Ok(())
 }
@@ -171,6 +180,10 @@ fn emit_conditional_op(instruction: CondOp, condition: Condition) -> String {
         Condition::LE => "le",
         Condition::G => "g",
         Condition::GE => "ge",
+        Condition::A => "a",
+        Condition::AE => "ae",
+        Condition::B => "b",
+        Condition::BE => "be",
     };
     format!("{first}{second}")
 }
@@ -214,6 +227,8 @@ fn emit_binary_op(binary_op: BinaryOp) -> &'static str {
         BinaryOp::Mult      => "imul",
         BinaryOp::Sal       => "sal",
         BinaryOp::Sar       => "sar",
+        BinaryOp::Shl       => "shl",
+        BinaryOp::Shr       => "shr",
         BinaryOp::BitAnd    => "and",
         BinaryOp::BitOr     => "or",
         BinaryOp::BitXor    => "xor",

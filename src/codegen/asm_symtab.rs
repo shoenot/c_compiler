@@ -15,6 +15,8 @@ pub fn convert_type(dtype: &Type) -> AsmType {
     match dtype {
         Type::Int => AsmType::Longword,
         Type::Long => AsmType::Quadword,
+        Type::UInt => AsmType::Longword,
+        Type::ULong => AsmType::Quadword,
         _ => unreachable!(),
     }
 }

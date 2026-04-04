@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use crate::lexer::*;
 use crate::parser::*;
-// use crate::semanal::*;
-// use crate::poise::*;
-// use crate::codegen::*;
-// use crate::emit::*;
+use crate::semanal::*;
+use crate::poise::*;
+use crate::codegen::*;
+use crate::emit::*;
 use crate::types::*;
 
 pub mod gcc;
@@ -77,98 +77,98 @@ fn run_parser(tokens: Vec<Token>, args: &crate::Args) -> Result<Program, Box<dyn
     Ok(program)
 }
 
-// fn run_semanal(program: &mut Program, symbols: &mut SymbolTable, args: &crate::Args) -> Result<(), Box<dyn Error>> {
-//     let var_map = semantic_analysis(program, symbols)?;
-//     if args.validate {
-//         for decl in &program.declarations {
-//             match decl {
-//                 Decl::FuncDecl(f) => {
-//                     println!("Function: {}", f.identifier);
-//                     println!("Parameters: {:?}", f.params);
-//                     println!("Storage Specifiers: {:?}", f.storage);
-//                     if let Some(b) = &f.body {
-//                         for item in &b.items {
-//                             println!("{:?}", item);
-//                         }
-//                     }
-//                 },
-//                 Decl::VarDecl(v) => {
-//                     println!("Top Level Variable: {:?}", v);
-//                 }
-//             }
-//         }
-//         println!("{:#?}", var_map);
-//         println!("{:#?}", symbols);
-//         std::process::exit(0);
-//     }
-//     Ok(())
-// }
-//
-// fn run_poise(program: Program, symbols: &mut SymbolTable, args: &crate::Args) -> PoiseProg {
-//     let poise = gen_poise(&program, symbols);
-//     if args.tacky {
-//         for item in poise.top_level_items  {
-//             match item {
-//                 TopLevelItem::F(f) => {
-//                     println!("Function: {}", f.identifier);
-//                     println!("Parameters: {:?}", f.params);
-//                     println!("Global: {:?}", f.global);
-//                     for instruction in f.body {
-//                         println!("{:?}", instruction);
-//                     }
-//                 },
-//                 TopLevelItem::V(v) => {
-//                     println!("Top Level Variable: {:?}", v);
-//                 }
-//             }
-//         }
-//         std::process::exit(0);
-//     }
-//     poise
-// }
-//
-// fn run_codegen(program: PoiseProg, symbols: &mut SymbolTable, asm_symbols: &mut AsmSymbolTable, args: &crate::Args) -> AsmProgram {
-//     let asm = gen_program(program, symbols, asm_symbols);
-//     if args.codegen {
-//         for item in asm.top_level  {
-//             match item {
-//                 AsmTopLevel::F(f) => {
-//                     println!("Function: {}", f.identifier);
-//                     println!("Global: {:?}", f.global);
-//                     for instruction in f.body {
-//                         println!("{:?}", instruction);
-//                     }
-//                 },
-//                 AsmTopLevel::V(v) => {
-//                     println!("Top Level Variable: {:?}", v);
-//                 }
-//             }
-//         }
-//         std::process::exit(0);
-//     }
-//     asm
-// }
-//
-//
-// fn run_emitter(asm_program: AsmProgram, symbols: &mut AsmSymbolTable, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
-//     fs::write(&output_file, emit_program(asm_program, symbols)?)?;
-//     Ok(output_file.to_path_buf())
-// }
+fn run_semanal(program: &mut Program, symbols: &mut SymbolTable, args: &crate::Args) -> Result<(), Box<dyn Error>> {
+    let var_map = semantic_analysis(program, symbols)?;
+    if args.validate {
+        for decl in &program.declarations {
+            match decl {
+                Decl::FuncDecl(f) => {
+                    println!("Function: {}", f.identifier);
+                    println!("Parameters: {:?}", f.params);
+                    println!("Storage Specifiers: {:?}", f.storage);
+                    if let Some(b) = &f.body {
+                        for item in &b.items {
+                            println!("{:?}", item);
+                        }
+                    }
+                },
+                Decl::VarDecl(v) => {
+                    println!("Top Level Variable: {:?}", v);
+                }
+            }
+        }
+        println!("{:#?}", var_map);
+        println!("{:#?}", symbols);
+        std::process::exit(0);
+    }
+    Ok(())
+}
+
+fn run_poise(program: Program, symbols: &mut SymbolTable, args: &crate::Args) -> PoiseProg {
+    let poise = gen_poise(&program, symbols);
+    if args.tacky {
+        for item in poise.top_level_items  {
+            match item {
+                TopLevelItem::F(f) => {
+                    println!("Function: {}", f.identifier);
+                    println!("Parameters: {:?}", f.params);
+                    println!("Global: {:?}", f.global);
+                    for instruction in f.body {
+                        println!("{:?}", instruction);
+                    }
+                },
+                TopLevelItem::V(v) => {
+                    println!("Top Level Variable: {:?}", v);
+                }
+            }
+        }
+        std::process::exit(0);
+    }
+    poise
+}
+
+fn run_codegen(program: PoiseProg, symbols: &mut SymbolTable, asm_symbols: &mut AsmSymbolTable, args: &crate::Args) -> AsmProgram {
+    let asm = gen_program(program, symbols, asm_symbols);
+    if args.codegen {
+        for item in asm.top_level  {
+            match item {
+                AsmTopLevel::F(f) => {
+                    println!("Function: {}", f.identifier);
+                    println!("Global: {:?}", f.global);
+                    for instruction in f.body {
+                        println!("{:?}", instruction);
+                    }
+                },
+                AsmTopLevel::V(v) => {
+                    println!("Top Level Variable: {:?}", v);
+                }
+            }
+        }
+        std::process::exit(0);
+    }
+    asm
+}
+
+
+fn run_emitter(asm_program: AsmProgram, symbols: &mut AsmSymbolTable, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
+    fs::write(&output_file, emit_program(asm_program, symbols)?)?;
+    Ok(output_file.to_path_buf())
+}
 
 pub fn run_compiler(input_file: &Path, args: crate::Args) -> Result<PathBuf, Box<dyn Error>> {
     let preprocessed = input_file;
-    // let mut symbols = HashMap::new();
-    // let mut asm_symbols = HashMap::new();
+    let mut symbols = HashMap::new();
+    let mut asm_symbols = HashMap::new();
 
     let lexed = run_lexer(preprocessed, &args)?;
     let mut parsed = run_parser(lexed, &args)?;
-    // run_semanal(&mut parsed, &mut symbols, &args)?;
-    // let poise = run_poise(parsed, &mut symbols, &args);
-    // let asm = run_codegen(poise, &mut symbols, &mut asm_symbols, &args);
-    //
+    run_semanal(&mut parsed, &mut symbols, &args)?;
+    let poise = run_poise(parsed, &mut symbols, &args);
+    let asm = run_codegen(poise, &mut symbols, &mut asm_symbols, &args);
+
     let mut output_file = input_file.to_path_buf();
     output_file.set_extension("s");
-    // run_emitter(asm, &mut asm_symbols, &output_file)?;
+    run_emitter(asm, &mut asm_symbols, &output_file)?;
 
     Ok(output_file.to_path_buf())
 }

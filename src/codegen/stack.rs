@@ -34,7 +34,7 @@ fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction
                         new_instructions.push(AsmInstruction::Mov(asmtype, Operand::Reg(Register::R10, regsize), dst));
                    },
                    (Operand::Imm(v), Operand::Stack(_) | Operand::Data(_)) => {
-                       if i32::try_from(*v).is_err() {
+                       if i32::try_from(*v).is_err() && asmtype == AsmType::Quadword {
                            new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, src, Operand::Reg(Register::R10, RegSize::Quad)));
                            new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, Operand::Reg(Register::R10, RegSize::Quad), dst));
                        } else {
@@ -116,7 +116,7 @@ fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction
                             _ => new_instructions.push(AsmInstruction::Binary(op, asmtype, src, dst)),
                         }
                     },
-                    BinaryOp::Sal | BinaryOp::Sar => {
+                    BinaryOp::Sal | BinaryOp::Sar | BinaryOp::Shl | BinaryOp::Shr  => {
                         new_instructions.push(AsmInstruction::Binary(op, asmtype, src, dst));
                     }
                 }
@@ -132,6 +132,17 @@ fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction
                      _ => new_instructions.push(AsmInstruction::Idiv(asmtype, src)),
                  }
             },
+            AsmInstruction::Div(asmtype, src) => {
+                 let src = resolve_operand(src, &mut map, &mut offset, symbols);
+                 let regsize = get_regsize(&asmtype);
+                 match &src {
+                     Operand::Imm(_) => {
+                         new_instructions.push(AsmInstruction::Mov(asmtype.clone(), src, Operand::Reg(Register::R10, regsize.clone())));
+                         new_instructions.push(AsmInstruction::Div(asmtype, Operand::Reg(Register::R10, regsize)));
+                     },
+                     _ => new_instructions.push(AsmInstruction::Div(asmtype, src)),
+                 }
+            },
             AsmInstruction::Cmp(asmtype, v1, v2) => {
                 let v1 = resolve_operand(v1, &mut map, &mut offset, symbols);
                 let v2 = resolve_operand(v2, &mut map, &mut offset, symbols);
@@ -140,7 +151,7 @@ fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction
                 let mut v2_scratch = false;
                 if let Operand::Imm(v) = v1.clone() {
                    if i32::try_from(v).is_err() {
-                       new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, v1.clone(), Operand::Reg(Register::R10, RegSize::Quad)));
+                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v1.clone(), Operand::Reg(Register::R10, regsize.clone())));
                        v1_scratch = true
                    }
                 }
@@ -156,7 +167,7 @@ fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction
                    _ => {},
                 }
                 match (v1_scratch, v2_scratch) {
-                    (true, false) => new_instructions.push(AsmInstruction::Cmp(asmtype, Operand::Reg(Register::R10, RegSize::Quad), v2)),
+                    (true, false) => new_instructions.push(AsmInstruction::Cmp(asmtype, Operand::Reg(Register::R10, regsize), v2)),
                     (false, true) => new_instructions.push(AsmInstruction::Cmp(asmtype, v1, Operand::Reg(Register::R11, regsize))),
                     (true, true) => new_instructions.push(AsmInstruction::Cmp(asmtype, Operand::Reg(Register::R10, RegSize::Quad), Operand::Reg(Register::R11, regsize))),
                     (false, false) => new_instructions.push(AsmInstruction::Cmp(asmtype, v1, v2)),
@@ -169,6 +180,18 @@ fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction
             AsmInstruction::Push(val) => {
                 let val = resolve_operand(val, &mut map, &mut offset, symbols);
                 new_instructions.push(AsmInstruction::Push(val));
+            },
+            AsmInstruction::MovZeroExtend(src, dst) => {
+                let src = resolve_operand(src, &mut map, &mut offset, symbols);
+                let dst = resolve_operand(dst, &mut map, &mut offset, symbols);
+                match dst {
+                    Operand::Reg(_, _) => new_instructions.push(AsmInstruction::Mov(AsmType::Longword, src, dst)),
+                    Operand::Data(_) | Operand::Stack(_) => {
+                        new_instructions.push(AsmInstruction::Mov(AsmType::Longword, src, Operand::Reg(Register::R11, RegSize::Long)));
+                        new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, Operand::Reg(Register::R11, RegSize::Quad), dst));
+                    },
+                    _ => {},
+                }
             },
             other => new_instructions.push(other),
         }

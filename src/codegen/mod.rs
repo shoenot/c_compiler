@@ -48,10 +48,12 @@ pub struct AsmStaticVar {
 pub enum AsmInstruction {
     Mov(AsmType, Operand, Operand),
     Movsx(Operand, Operand),
+    MovZeroExtend(Operand, Operand),
     Unary(UnaryOp, AsmType, Operand),
     Binary(BinaryOp, AsmType, Operand, Operand),
     Cmp(AsmType, Operand, Operand),
     Idiv(AsmType, Operand),
+    Div(AsmType, Operand),
     Cdq(AsmType),
     Jmp(String),
     JmpCC(Condition, String),
@@ -75,6 +77,8 @@ pub enum BinaryOp {
     Mult,
     Sal,
     Sar,
+    Shr,
+    Shl,
     BitAnd,
     BitOr,
     BitXor,
@@ -100,7 +104,7 @@ pub enum Register {
     R9,
     R10,
     R11,
-    SP
+    SP,
 }
 
 #[derive(Debug,Clone)]
@@ -118,6 +122,10 @@ pub enum Condition {
     LE,
     G,
     GE,
+    A,
+    AE,
+    B,
+    BE,
 }
 
 // at this point all the symbols should be in the table. so if the unwrap fails that means
@@ -130,11 +138,27 @@ fn get_var_type(symbols: &SymbolTable, ident: &String) -> AsmType {
     convert_type(&get_symbol(symbols, ident).datatype)
 }
 
+fn get_num_type(symbols: &SymbolTable, val: &poise::PoiseVal) -> Type {
+    match val {
+        poise::PoiseVal::Variable(ident) => get_symbol(symbols, ident).datatype,
+        poise::PoiseVal::Constant(i) => {
+            match i {
+                    Const::Int(_) => Type::Int,
+                    Const::Long(_) => Type::Long,
+                    Const::UInt(_) => Type::UInt,
+                    Const::ULong(_) => Type::ULong,
+            }
+        },
+    }
+}
+
 fn get_asmtype(symbols: &SymbolTable, val: &poise::PoiseVal) -> AsmType {
     match val {
         poise::PoiseVal::Variable(ident) => get_var_type(symbols, ident),
         poise::PoiseVal::Constant(Const::Int(_)) => AsmType::Longword,
         poise::PoiseVal::Constant(Const::Long(_)) => AsmType::Quadword,
+        poise::PoiseVal::Constant(Const::UInt(_)) => AsmType::Longword,
+        poise::PoiseVal::Constant(Const::ULong(_)) => AsmType::Quadword,
     }
 }
 
@@ -297,6 +321,7 @@ fn gen_instructions(
             poise::PoiseInstruction::Truncate { src, dst } => {
                 generated.push(AsmInstruction::Mov(AsmType::Longword, gen_operand(src), gen_operand(dst)));
             },
+            poise::PoiseInstruction::ZeroExtend { src, dst } => generated.push(AsmInstruction::MovZeroExtend(gen_operand(src), gen_operand(dst))),
         }
     }
 }
@@ -334,6 +359,8 @@ fn gen_operand(exp: poise::PoiseVal) -> Operand {
         poise::PoiseVal::Constant(cst) => match cst {
             Const::Int(val) => Operand::Imm(val as i64),
             Const::Long(val) => Operand::Imm(val),
+            Const::UInt(val) => Operand::Imm(val as i64),
+            Const::ULong(val) => Operand::Imm(val as i64),
         }
         poise::PoiseVal::Variable(ident) => Operand::Pseudo(ident),
     }
@@ -365,16 +392,18 @@ fn unary_handler(
     };
 }
 
-fn gen_binary(exp: poise::PoiseBinaryOp) -> BinaryOp {
-    match exp {
-        poise::PoiseBinaryOp::Add => BinaryOp::Add,
-        poise::PoiseBinaryOp::Subtract => BinaryOp::Sub,
-        poise::PoiseBinaryOp::Multiply => BinaryOp::Mult,
-        poise::PoiseBinaryOp::LeftShift =>  BinaryOp::Sal,
-        poise::PoiseBinaryOp::RightShift => BinaryOp::Sar,
-        poise::PoiseBinaryOp::BitwiseAnd => BinaryOp::BitAnd,
-        poise::PoiseBinaryOp::BitwiseOr  => BinaryOp::BitOr,
-        poise::PoiseBinaryOp::BitwiseXor => BinaryOp::BitXor,
+fn gen_binary(exp: poise::PoiseBinaryOp, signed: bool) -> BinaryOp {
+    match (exp, signed) {
+        (poise::PoiseBinaryOp::Add, _) => BinaryOp::Add,
+        (poise::PoiseBinaryOp::Subtract, _) => BinaryOp::Sub,
+        (poise::PoiseBinaryOp::Multiply, _) => BinaryOp::Mult,
+        (poise::PoiseBinaryOp::LeftShift, true) =>  BinaryOp::Sal,
+        (poise::PoiseBinaryOp::RightShift, true) => BinaryOp::Sar,
+        (poise::PoiseBinaryOp::LeftShift, false) =>  BinaryOp::Shl,
+        (poise::PoiseBinaryOp::RightShift, false) => BinaryOp::Shr,
+        (poise::PoiseBinaryOp::BitwiseAnd, _) => BinaryOp::BitAnd,
+        (poise::PoiseBinaryOp::BitwiseOr , _) => BinaryOp::BitOr,
+        (poise::PoiseBinaryOp::BitwiseXor, _) => BinaryOp::BitXor,
         _ => unreachable!(),
     }
 }
@@ -387,14 +416,18 @@ fn gen_division(exp: PoiseBinaryOp) -> Register {
     }
 }
 
-fn gen_conditional(op: PoiseBinaryOp) -> Condition {
-    match op {
-        PoiseBinaryOp::Equal => Condition::E,
-        PoiseBinaryOp::NotEqual => Condition::NE,
-        PoiseBinaryOp::GreaterThan => Condition::G,
-        PoiseBinaryOp::GreaterOrEqual => Condition::GE,
-        PoiseBinaryOp::LessThan => Condition::L,
-        PoiseBinaryOp::LessOrEqual => Condition::LE,
+fn gen_conditional(op: PoiseBinaryOp, signed: bool) -> Condition {
+    match (op, signed) {
+        (PoiseBinaryOp::Equal, _) => Condition::E,
+        (PoiseBinaryOp::NotEqual, _) => Condition::NE,
+        (PoiseBinaryOp::GreaterThan, true) => Condition::G,
+        (PoiseBinaryOp::GreaterOrEqual, true) => Condition::GE,
+        (PoiseBinaryOp::LessThan, true) => Condition::L,
+        (PoiseBinaryOp::LessOrEqual, true) => Condition::LE,
+        (PoiseBinaryOp::GreaterThan, false) => Condition::A,
+        (PoiseBinaryOp::GreaterOrEqual, false) => Condition::AE,
+        (PoiseBinaryOp::LessThan, false) => Condition::B,
+        (PoiseBinaryOp::LessOrEqual, false) => Condition::BE,
         _ => unreachable!(),
     }
 }
@@ -407,31 +440,40 @@ fn binary_handler(
     generated: &mut Vec<AsmInstruction>,
     symbols: &SymbolTable) {
     let srct = get_asmtype(symbols, &src1);
+    let signed = get_num_type(symbols, &src1).is_signed();
     let regsize = get_regsize(&srct);
     let (s1, s2, d) = (gen_operand(src1), gen_operand(src2), gen_operand(dst));
     match op {
         PoiseBinaryOp::Add | PoiseBinaryOp::Subtract | PoiseBinaryOp::Multiply |
         PoiseBinaryOp::BitwiseAnd | PoiseBinaryOp::BitwiseOr | PoiseBinaryOp::BitwiseXor => {
             generated.push(AsmInstruction::Mov(srct.clone(), s1, d.clone()));
-            generated.push(AsmInstruction::Binary(gen_binary(op), srct.clone(), s2, d));
+            generated.push(AsmInstruction::Binary(gen_binary(op, signed), srct.clone(), s2, d));
         },
         PoiseBinaryOp::Divide | PoiseBinaryOp::Remainder => {
-            generated.push(AsmInstruction::Mov(srct.clone(), s1, Operand::Reg(Register::AX, regsize.clone())));
-            generated.push(AsmInstruction::Mov(srct.clone(), s2, Operand::Reg(Register::R10, regsize.clone())));
-            generated.push(AsmInstruction::Cdq(srct.clone()));
-            generated.push(AsmInstruction::Idiv(srct.clone(), Operand::Reg(Register::R10, regsize.clone())));
-            generated.push(AsmInstruction::Mov(srct.clone(), Operand::Reg(gen_division(op), regsize.clone()), d));
+            if signed {
+                generated.push(AsmInstruction::Mov(srct.clone(), s1, Operand::Reg(Register::AX, regsize.clone())));
+                generated.push(AsmInstruction::Mov(srct.clone(), s2, Operand::Reg(Register::R10, regsize.clone())));
+                generated.push(AsmInstruction::Cdq(srct.clone()));
+                generated.push(AsmInstruction::Idiv(srct.clone(), Operand::Reg(Register::R10, regsize.clone())));
+                generated.push(AsmInstruction::Mov(srct.clone(), Operand::Reg(gen_division(op), regsize.clone()), d));
+            } else {
+                generated.push(AsmInstruction::Mov(srct.clone(), s1, Operand::Reg(Register::AX, regsize.clone())));
+                generated.push(AsmInstruction::Mov(srct.clone(), s2, Operand::Reg(Register::R10, regsize.clone())));
+                generated.push(AsmInstruction::Mov(srct.clone(), Operand::Imm(0), Operand::Reg(Register::DX, regsize.clone())));
+                generated.push(AsmInstruction::Div(srct.clone(), Operand::Reg(Register::R10, regsize.clone())));
+                generated.push(AsmInstruction::Mov(srct.clone(), Operand::Reg(gen_division(op), regsize.clone()), d));
+            }
         },
         PoiseBinaryOp::LeftShift | PoiseBinaryOp::RightShift => {
             generated.push(AsmInstruction::Mov(srct.clone(), s1, d.clone()));
             match &s2 {
                 Operand::Imm(_) => {
-                    generated.push(AsmInstruction::Binary(gen_binary(op), srct.clone(), s2, d));
+                    generated.push(AsmInstruction::Binary(gen_binary(op, signed), srct.clone(), s2, d));
                 },
                 _ => {
                     generated.push(AsmInstruction::Mov(AsmType::Longword, s2, Operand::Reg(Register::R10, RegSize::Long)));
                     generated.push(AsmInstruction::Mov(AsmType::Byte, Operand::Reg(Register::R10, RegSize::Byte), Operand::Reg(Register::CX, RegSize::Byte)));
-                    generated.push(AsmInstruction::Binary(gen_binary(op), srct.clone(), Operand::Reg(Register::CX, RegSize::Byte), d));
+                    generated.push(AsmInstruction::Binary(gen_binary(op, signed), srct.clone(), Operand::Reg(Register::CX, RegSize::Byte), d));
                 },
             }
         }
@@ -439,7 +481,7 @@ fn binary_handler(
         PoiseBinaryOp::GreaterOrEqual | PoiseBinaryOp::LessThan | PoiseBinaryOp::LessOrEqual => {
             generated.push(AsmInstruction::Cmp(srct, s2.clone(), s1));
             generated.push(AsmInstruction::Mov(AsmType::Longword, Operand::Imm(0), d.clone()));
-            generated.push(AsmInstruction::SetCC(gen_conditional(op), d));
+            generated.push(AsmInstruction::SetCC(gen_conditional(op, signed), d));
         }
     }
 }

@@ -39,6 +39,7 @@ pub enum PoiseInstruction {
     Return(PoiseVal),
     SignExtend{src: PoiseVal, dst: PoiseVal},
     Truncate{src: PoiseVal, dst: PoiseVal},
+    ZeroExtend{src: PoiseVal, dst: PoiseVal},
     Unary{op: PoiseUnaryOp, src: PoiseVal, dst: PoiseVal},
     Binary{op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseVal},
     Copy{src: PoiseVal, dst:PoiseVal},
@@ -165,16 +166,14 @@ fn gen_inst_var_declaration(
     }
     if let Some(exp) = declaration.init.as_ref() {
         let val = emit_expression(exp, instructions, symbols, count);
-        let src_type = get_type(exp);
-        let dst_type = symbols.get(&declaration.identifier).unwrap().datatype.clone();
-        let val = if src_type != dst_type {
-            let tmp = count.new_var(dst_type.clone(), symbols);
-            match dst_type {
-                Type::Long => instructions.push(PoiseInstruction::SignExtend { src: val, dst: tmp.clone() }),
-                Type::Int => instructions.push(PoiseInstruction::Truncate { src: val, dst: tmp.clone() }),
-                _ => unreachable!(),
-            }
-            tmp
+        let s = get_type(exp);
+        let d = symbols.get(&declaration.identifier).unwrap().datatype.clone();
+        let val = if s != d {
+            let tmp = count.new_var(d.clone(), symbols);
+            if s.size() == d.size() { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
+            else if s.size() > d.size() { instructions.push(PoiseInstruction::Truncate { src: val, dst: tmp.clone() }); tmp }
+            else if s.is_signed() { instructions.push(PoiseInstruction::SignExtend { src: val, dst: tmp.clone() }); tmp }
+            else { instructions.push(PoiseInstruction::ZeroExtend { src: val, dst: tmp.clone() }); tmp }
         } else {
             val
         };
@@ -385,12 +384,10 @@ fn emit_expression(
                 var
             } else {
                 let dst = count.new_var(t.clone(), symbols);
-                match *t {
-                    Type::Long => instructions.push(PoiseInstruction::SignExtend { src: var, dst: dst.clone() }),
-                    Type::Int => instructions.push(PoiseInstruction::Truncate { src: var, dst: dst.clone() }),
-                    _ => unreachable!(),
-                }
-                dst
+                if t.size() == get_type(e).size() { instructions.push(PoiseInstruction::Copy { src: var, dst: dst.clone() }); return dst }
+                else if t.size() < get_type(e).size() { instructions.push(PoiseInstruction::Truncate { src: var, dst: dst.clone() }); return dst }
+                else if get_type(e).is_signed() { instructions.push(PoiseInstruction::SignExtend { src: var, dst: dst.clone() }); return dst }
+                else { instructions.push(PoiseInstruction::ZeroExtend { src: var, dst: dst.clone() }); return dst  }
             }
         },
     }

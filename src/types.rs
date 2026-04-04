@@ -10,17 +10,17 @@ pub enum Type {
 }
 
 impl Type {
-    fn rank(&self) -> usize {
+    pub fn size(&self) -> usize {
         match self {
-            Type::Int => 1,
-            Type::UInt => 2,
-            Type::Long => 3,
-            Type::ULong => 4,
+            Type::Int => 32,
+            Type::UInt => 32,
+            Type::Long => 64,
+            Type::ULong => 64,
             Type::FuncType { .. } => unreachable!(),
         }
     }
 
-    fn is_signed(&self) -> bool {
+    pub fn is_signed(&self) -> bool {
         match self {
             Type::Int => true,
             Type::UInt => false,
@@ -28,14 +28,6 @@ impl Type {
             Type::ULong => false,
             Type::FuncType { .. } => unreachable!(),
         }
-    }
-
-    fn can_represent(&self, t: Type) -> u64 {
-        match self {
-            Type::Int => if t == ,
-            Type::UInt => false,
-            Type::Long => true,
-            Type::ULong => false,
     }
 }
 
@@ -66,6 +58,8 @@ pub enum InitialValue {
 pub enum StaticInit {
     IntInit(i32),
     LongInit(i64),
+    UIntInit(u32),
+    ULongInit(u64),
 }
 
 impl IdentAttrs {

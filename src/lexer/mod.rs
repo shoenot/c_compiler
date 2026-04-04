@@ -1,6 +1,5 @@
 use std::{
     iter::Peekable, vec::IntoIter, fmt,
-    collections::hash_set::HashSet
 };
 pub mod tokens;
 pub use tokens::TokenType;
