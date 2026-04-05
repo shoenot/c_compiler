@@ -8,7 +8,7 @@ use crate::parser::*;
 use crate::semanal::*;
 use crate::poise::*;
 use crate::codegen::*;
-use crate::emit::*;
+// use crate::emit::*;
 use crate::types::*;
 
 pub mod gcc;
@@ -149,11 +149,10 @@ fn run_codegen(program: PoiseProg, symbols: &mut SymbolTable, asm_symbols: &mut 
     asm
 }
 
-
-fn run_emitter(asm_program: AsmProgram, symbols: &mut AsmSymbolTable, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
-    fs::write(&output_file, emit_program(asm_program, symbols)?)?;
-    Ok(output_file.to_path_buf())
-}
+// fn run_emitter(asm_program: AsmProgram, symbols: &mut AsmSymbolTable, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
+//     fs::write(&output_file, emit_program(asm_program, symbols)?)?;
+//     Ok(output_file.to_path_buf())
+// }
 
 pub fn run_compiler(input_file: &Path, args: crate::Args) -> Result<PathBuf, Box<dyn Error>> {
     let preprocessed = input_file;
@@ -168,7 +167,7 @@ pub fn run_compiler(input_file: &Path, args: crate::Args) -> Result<PathBuf, Box
 
     let mut output_file = input_file.to_path_buf();
     output_file.set_extension("s");
-    run_emitter(asm, &mut asm_symbols, &output_file)?;
+    // run_emitter(asm, &mut asm_symbols, &output_file)?;
 
     Ok(output_file.to_path_buf())
 }

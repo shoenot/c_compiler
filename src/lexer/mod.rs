@@ -7,14 +7,27 @@ pub use tokens::TokenType;
 #[derive(Debug)]
 pub enum LexerError { 
     InvalidCharacter(char, Span),
-    InvalidSuffix(Span),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NumericType {
+    Int,
+    Long,
+    UInt,
+    ULong,
+    Double
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NumericLiteral {
+    pub numtype: NumericType,
+    pub number: String,
 }
 
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             LexerError::InvalidCharacter(c, s) => write!(f, "Lexer Error: invalid character! {}\nLine: {}, Col: {}", c, s.line_number, s.col),
-            LexerError::InvalidSuffix(s) => write!(f, "Lexer Error: invalid constant suffix! \nLine: {}, Col: {}", s.line_number, s.col)
         }
     }
 }
@@ -39,14 +52,9 @@ pub struct Token {
     pub location: Span,
 }
 
-struct SuffixFlags {
-    pub unsigned: bool,
-    pub long: bool,
-}
-
-fn flip_or_err(flag: &mut bool, span: Span) -> Result<(), LexerError> { 
+fn flip_or_err(flag: &mut bool, c: char, span: Span) -> Result<(), LexerError> { 
     if *flag {
-        Err(LexerError::InvalidSuffix(span))
+        Err(LexerError::InvalidCharacter(c, span))
     } else {
         *flag = true;
         Ok(())
@@ -158,7 +166,7 @@ impl Tokenizer {
             },
             '=' => self.is_double_char('=', TokenType::Equal, TokenType::DoubleEqual),
             other => {
-                if other.is_digit(10) {
+                if other.is_ascii_digit() || other == '.' {
                     self.scan_constant(other)?
                 } else if other.is_ascii_alphabetic() || other == '_' {
                     self.scan_text(other)
@@ -179,36 +187,73 @@ impl Tokenizer {
 
     fn scan_constant(&mut self, first: char) -> Result<TokenType, LexerError> {
         let mut number = String::from(first);
+        let mut numtype = NumericType::Int;
+        let mut seen_point = false;
+        if number == String::from(".") { seen_point = true }
+        let mut seen_exponent = false;
 
         while self.peek().is_ascii_digit() {
             number.push(self.advance());
         }
 
-        let mut suffix_flags = SuffixFlags { long: false, unsigned: false };
-
-        if self.peek().is_ascii_alphabetic() {
-            while self.peek().is_ascii_alphabetic() {
-                let suffix = self.peek();
-                match suffix {
-                    'l' | 'L' => {
-                        self.advance();
-                        flip_or_err(&mut suffix_flags.long, self.make_span())?
-                    },
-                    'u' | 'U' => {
-                        self.advance();
-                        flip_or_err(&mut suffix_flags.unsigned, self.make_span())?
-                    },
-                    _ => return Err(LexerError::InvalidCharacter(suffix, self.make_span())),
+        if self.peek().is_ascii_alphabetic() || self.peek() == '.' {
+            if ['l', 'L', 'u', 'U'].contains(&self.peek()) {
+                while self.peek().is_ascii_alphabetic() {
+                    let letter = self.peek();
+                    match letter {
+                        'l' | 'L' => {
+                            self.advance();
+                            if numtype == NumericType::Int { numtype = NumericType::Long } 
+                            else if numtype == NumericType::UInt { numtype = NumericType::ULong }
+                            else { return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                        },
+                        'u' | 'U' => {
+                            self.advance();
+                            if numtype == NumericType::Int { numtype = NumericType::UInt } 
+                            else if numtype == NumericType::Long { numtype = NumericType::ULong }
+                            else { return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                        },
+                        _ => return Err(LexerError::InvalidCharacter(letter, self.make_span())) 
+                    };
                 }
-            } 
+            } else if ['.', 'e', 'E'].contains(&self.peek()) {
+                while self.peek().is_ascii_alphanumeric() || self.peek() == '.' {
+                    let letter = self.peek();
+                    match letter {
+                        '.' => {
+                            if seen_exponent { return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                            flip_or_err(&mut seen_point, letter, self.make_span())?;
+                            number.push(self.advance());
+                            if numtype == NumericType::Int { numtype = NumericType::Double } 
+                            else { return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                            if self.peek().is_ascii_alphabetic() || self.peek() == '_' { 
+                                if !['e', 'E'].contains(&self.peek()) {
+                                    return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                            }
+                        },
+                        'e' | 'E' => {
+                            number.push(self.advance());
+                            flip_or_err(&mut seen_exponent, letter, self.make_span())?;
+                            if matches!(numtype, NumericType::Int | NumericType::Double) { numtype = NumericType::Double } 
+                            else { return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                            if ['+', '-'].contains(&self.peek()) {
+                                number.push(self.advance());
+                                if !self.peek().is_ascii_digit() { return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                            }
+                            if !self.peek().is_ascii_digit() { return Err(LexerError::InvalidCharacter(letter, self.make_span())) }
+                        },
+                        letter if letter.is_ascii_digit() => {
+                            number.push(self.advance());
+                        }
+                        _ => return Err(LexerError::InvalidCharacter(letter, self.make_span())) 
+                    }
+                }
+            } else { return Err(LexerError::InvalidCharacter(self.peek(), self.make_span())) }
+        } else if seen_point {
+            numtype = NumericType::Double;
         }
-            
-        match (suffix_flags.long, suffix_flags.unsigned) {
-            (true, true) => Ok(TokenType::UnsignedLongConstant(number)),
-            (true, false) => Ok(TokenType::LongConstant(number)),
-            (false, true) => Ok(TokenType::UnsignedIntConstant(number)),
-            (false, false) => Ok(TokenType::Constant(number)),
-        }
+        
+        Ok(TokenType::NumericConstant(NumericLiteral { numtype, number }))
     }
 
     fn parse_keyword(&self, lexeme: &str) -> Option<TokenType> {
@@ -232,6 +277,7 @@ impl Tokenizer {
             "long" => TokenType::Long,
             "signed" => TokenType::Signed,
             "unsigned" => TokenType::Unsigned,
+            "double" => TokenType::Double,
             _ => return None,
         };
 

@@ -1,4 +1,5 @@
 use std::iter::zip;
+use ordered_float::OrderedFloat;
 
 use super::*;
 use visitor_trait::*;
@@ -28,9 +29,9 @@ fn set_type(expr: &mut Expression, expression_type: Type) -> Type {
 }
 
 fn get_common_type(t1: Type, t2: Type) -> Type {
-    if t1 == t2 {
-        t1
-    } else if t1.size() == t2.size() {
+    if t1 == t2 { t1 } 
+    else if t1 == Type::Double || t2 == Type::Double { Type::Double }
+    else if t1.size() == t2.size() {
         if t1.is_signed() { t2 } else { t1 }
     } else if t1.size() > t2.size() { t1 } else { t2 }
 }
@@ -48,6 +49,7 @@ pub fn get_static_init(constant: Const) -> StaticInit {
         Const::Int(i) => StaticInit::IntInit(i),
         Const::UInt(i) => StaticInit::UIntInit(i),
         Const::ULong(i) => StaticInit::ULongInit(i),
+        Const::Double(i) => StaticInit::DoubleInit(i),
     }
 }
 
@@ -57,12 +59,14 @@ pub fn convert_constant(constant: Const, into: Type) -> Const {
         Const::Long(v) => v as u128,
         Const::UInt(v) => v as u128,
         Const::ULong(v) => v as u128,
+        Const::Double(_) => return constant,
     };
     match into {
         Type::Int => Const::Int(value as i32),
         Type::Long => Const::Long(value as i64),
         Type::UInt => Const::UInt(value as u32),
         Type::ULong => Const::ULong(value as u64),
+        Type::Double => Const::Double(OrderedFloat(value as f64)),
         Type::FuncType { .. } => unreachable!()
     }
 }
@@ -180,6 +184,7 @@ impl<'a> TypeChecker<'a> {
                     Const::Long(_) => Ok(set_type(expr, Type::Long)),
                     Const::UInt(_) => Ok(set_type(expr, Type::UInt)),
                     Const::ULong(_) => Ok(set_type(expr, Type::ULong)),
+                    Const::Double(_) => Ok(set_type(expr, Type::Double)),
                 }
             },
             ExpressionKind::Cast(t, factor) => {
@@ -189,10 +194,14 @@ impl<'a> TypeChecker<'a> {
             },
             ExpressionKind::Unary(op, inner) => {
                 let inner_exp = self.type_expression(inner)?;
-                if *op == UnaryOp::Not {
-                    Ok(set_type(expr, Type::Int))
+                if inner.expression_type == Some(Type::Double) && matches!(op, UnaryOp::Complement) {
+                    Err(SemanticError::ComplementFloat(expr.span))
                 } else {
-                    Ok(set_type(expr, inner_exp))
+                    if *op == UnaryOp::Not {
+                        Ok(set_type(expr, Type::Int))
+                    } else {
+                        Ok(set_type(expr, inner_exp))
+                    }
                 }
             },
             ExpressionKind::Binary(op, exp1, exp2) => {
@@ -213,7 +222,11 @@ impl<'a> TypeChecker<'a> {
                     } else if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
                         Ok(set_type(expr, exp1_type))
                     } else {
-                        Ok(set_type(expr, common_type))
+                        if matches!(op, BinaryOp::Remainder) && matches!(common_type, Type::Double) {
+                            Err(SemanticError::RemainderFloat(expr.span))
+                        } else {
+                            Ok(set_type(expr, common_type))
+                        }
                     }
                 } 
             },

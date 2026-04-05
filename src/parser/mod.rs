@@ -25,6 +25,8 @@ pub enum ParseError {
     InvalidTypes(Span),
     InvalidStorageClasses(Span),
     IntegerOverflow(Span),
+    InvalidFloat(Span),
+    MissingType(Span),
 }
 
 impl fmt::Display for ParseError {
@@ -39,8 +41,10 @@ impl fmt::Display for ParseError {
             ParseError::ExpectedParam(s) => write!(f, "Parse Error: expected parameter!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::LabelWithoutStatement(s) => write!(f, "Parse Error: label without statement!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::InvalidTypes(s) => write!(f, "Parse Error: invalid types!\nLine: {}, Col: {}", s.line_number, s.col),
+            ParseError::InvalidFloat(s) => write!(f, "Parse Error: invalid float!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::InvalidStorageClasses(s) => write!(f, "Parse Error: invalid storage classes!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::IntegerOverflow(s) => write!(f, "Parse Error: integer overflow!\nLine: {}, Col: {}", s.line_number, s.col),
+            ParseError::MissingType(s) => write!(f, "Parse Error: no type specified!\nLine: {}, Col: {}", s.line_number, s.col),
         }
     }
 }
@@ -59,13 +63,19 @@ struct TypeFlags {
     saw_long: bool,
     saw_unsigned: bool,
     saw_signed: bool,
+    saw_double: bool,
 }
 
 static SPECIFIERS: &[TokenType] = &[TokenType::Static, TokenType::Extern, TokenType::Int, TokenType::Long,
-                                    TokenType::Unsigned, TokenType::Signed];
+                                    TokenType::Unsigned, TokenType::Signed, TokenType::Double];
 
 static TYPE_SPECIFIERS: &[TokenType] = &[TokenType::Int, TokenType::Long,
-                                         TokenType::Unsigned, TokenType::Signed];
+                                         TokenType::Unsigned, TokenType::Signed,
+                                         TokenType::Double];
+
+static INT_SPECIFIERS: &[TokenType] = &[TokenType::Int, TokenType::Long,
+                                         TokenType::Unsigned, TokenType::Signed,
+                                         TokenType::Double];
 
 fn flip_or_err(flag: &mut bool, span: Span) -> Result<(), ParseError> { 
     if *flag {
@@ -83,6 +93,7 @@ impl TypeFlags {
             saw_long: false,
             saw_unsigned: false,
             saw_signed: false,
+            saw_double: false,
         }
     }
 
@@ -92,6 +103,7 @@ impl TypeFlags {
             TokenType::Long => flip_or_err(&mut self.saw_long, span.clone())?,
             TokenType::Unsigned => flip_or_err(&mut self.saw_unsigned, span.clone())?,
             TokenType::Signed => flip_or_err(&mut self.saw_signed, span.clone())?,
+            TokenType::Double => flip_or_err(&mut self.saw_double, span.clone())?,
             _ => return Err(ParseError::InvalidTypes(span.clone())),
         }
         Ok(())
@@ -101,16 +113,20 @@ impl TypeFlags {
         if self.saw_signed && self.saw_unsigned {
             return Err(ParseError::InvalidTypes(*span));
         }
-        match self {
-            TypeFlags { saw_int:true, saw_long:false, saw_unsigned: false, .. } => Ok(Type::Int),
-            TypeFlags { saw_int:false, saw_long:true, saw_unsigned: false, .. } => Ok(Type::Long),
-            TypeFlags { saw_int:true, saw_long:true, saw_unsigned: false, .. } => Ok(Type::Long),
-            TypeFlags { saw_int:true, saw_long:false, saw_unsigned: true, .. } => Ok(Type::UInt),
-            TypeFlags { saw_int:false, saw_long:true, saw_unsigned: true, .. } => Ok(Type::ULong),
-            TypeFlags { saw_int:true, saw_long:true, saw_unsigned: true, .. } => Ok(Type::ULong),
-            TypeFlags { saw_int:false, saw_long:false, saw_unsigned: true, .. } => Ok(Type::UInt),
-            TypeFlags { saw_int:false, saw_long:false, saw_unsigned: false, saw_signed: true } => Ok(Type::Int),
-            TypeFlags { saw_int:false, saw_long:false, saw_unsigned: false, .. } => Err(ParseError::InvalidTypes(span.clone())),
+        if !self.saw_double {
+            if !self.saw_unsigned {
+                if self.saw_long { Ok(Type::Long) }
+                else { Ok(Type::Int) }
+            } else {
+                if self.saw_long { Ok(Type::ULong) }
+                else { Ok(Type::UInt) }
+            } 
+        } else {
+            if !(self.saw_long || self.saw_unsigned || self.saw_int || self.saw_signed) {
+                Ok(Type::Double)
+            } else {
+                Err(ParseError::InvalidTypes(*span))
+            }
         }
     }
 }
@@ -251,6 +267,7 @@ impl Parser {
                 }
             }
         }
+        if types.len() < 1 { return Err(ParseError::InvalidTypes(self.current_span)) }
         let dtype = self.parse_types(&types)?;
         Ok((dtype, storage))
     }

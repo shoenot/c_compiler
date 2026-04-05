@@ -40,6 +40,10 @@ pub enum PoiseInstruction {
     SignExtend{src: PoiseVal, dst: PoiseVal},
     Truncate{src: PoiseVal, dst: PoiseVal},
     ZeroExtend{src: PoiseVal, dst: PoiseVal},
+    DoubleToInt{src: PoiseVal, dst: PoiseVal},
+    DoubleToUInt{src: PoiseVal, dst: PoiseVal},
+    IntToDouble{src: PoiseVal, dst: PoiseVal},
+    UIntToDouble{src: PoiseVal, dst: PoiseVal},
     Unary{op: PoiseUnaryOp, src: PoiseVal, dst: PoiseVal},
     Binary{op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseVal},
     Copy{src: PoiseVal, dst:PoiseVal},
@@ -170,7 +174,14 @@ fn gen_inst_var_declaration(
         let d = symbols.get(&declaration.identifier).unwrap().datatype.clone();
         let tmp = count.new_var(d.clone(), symbols);
         let val = {
-            if s.size() == d.size() { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
+            if s == d { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
+            else if s == Type::Double {
+                if d.is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: val, dst: tmp.clone() }); tmp }
+                else { instructions.push(PoiseInstruction::UIntToDouble { src: val, dst: tmp.clone() }); tmp }
+            } else if d == Type::Double {
+                if s.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: val, dst: tmp.clone() }); tmp }
+                else { instructions.push(PoiseInstruction::DoubleToUInt { src: val, dst: tmp.clone() }); tmp }
+            } else if s.size() == d.size() { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
             else if s.size() > d.size() { instructions.push(PoiseInstruction::Truncate { src: val, dst: tmp.clone() }); tmp }
             else if s.is_signed() { instructions.push(PoiseInstruction::SignExtend { src: val, dst: tmp.clone() }); tmp }
             else { instructions.push(PoiseInstruction::ZeroExtend { src: val, dst: tmp.clone() }); tmp }
@@ -380,6 +391,14 @@ fn emit_expression(
             let var = emit_expression(e, instructions, symbols, count);
             if *t == get_type(e) {
                 var
+            } else if *t == Type::Double {
+                let dst = count.new_var(t.clone(), symbols);
+                if get_type(e).is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: var, dst: dst.clone() }); dst }
+                else { instructions.push(PoiseInstruction::UIntToDouble { src: var, dst: dst.clone() }); dst }
+            } else if get_type(e) == Type::Double {
+                let dst = count.new_var(t.clone(), symbols);
+                if t.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: var, dst: dst.clone() }); dst }
+                else { instructions.push(PoiseInstruction::DoubleToUInt { src: var, dst: dst.clone() }); dst }
             } else {
                 let dst = count.new_var(t.clone(), symbols);
                 if t.size() == get_type(e).size() { instructions.push(PoiseInstruction::Copy { src: var, dst: dst.clone() }); return dst }

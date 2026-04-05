@@ -1,6 +1,9 @@
+use crate::lexer::NumericLiteral;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
     Identifier(String),
+    NumericConstant(NumericLiteral),
     OpenParen,
     CloseParen,
     OpenBrace,
@@ -29,7 +32,6 @@ pub enum TokenType {
     DoubleRightAngled,
     LessOrEqual,
     GreaterOrEqual,
-    Constant(String),
     PlusEqual,
     MinusEqual,
     AsteriskEqual,
@@ -62,7 +64,5 @@ pub enum TokenType {
     Long,
     Signed,
     Unsigned,
-    LongConstant(String),
-    UnsignedIntConstant(String),
-    UnsignedLongConstant(String),
+    Double,
 }

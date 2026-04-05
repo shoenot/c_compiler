@@ -19,6 +19,7 @@ impl Visitor for SwitchCollector {
                             Const::Long(i) => *i as i128,
                             Const::UInt(i) => *i as i128,
                             Const::ULong(i) => *i as i128,
+                            Const::Double(_) => return Err(SemanticError::FloatUsedInCase(expr.span))
                         };
                         if !seen.insert(key) {
                             return Err(SemanticError::DuplicateCase(statement.span));
@@ -125,6 +126,7 @@ fn eval_constant(expr: &ExpressionKind) -> Option<i128> {
             Const::Long(i) => Some(*i as i128),
             Const::UInt(i)  => Some(*i as i128), 
             Const::ULong(i) => Some(*i as i128),
+            Const::Double(i) => panic!(),
         }
         ExpressionKind::Unary(op, expr) => {
             let val = eval_constant(expr)?;

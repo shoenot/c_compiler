@@ -21,12 +21,21 @@ pub enum AsmType {
     Byte,
     Longword,
     Quadword,
+    Double,
 }
 
 #[derive(Debug)]
 pub enum AsmTopLevel {
     F(AsmFunction),
     V(AsmStaticVar),
+    C(StaticConstant),
+}
+
+#[derive(Debug)]
+pub struct StaticConstant {
+    pub identifier: String,
+    pub alignment: i32,
+    pub init: StaticInit,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +71,8 @@ pub enum AsmInstruction {
     Push(Operand),
     Call(String),
     Ret,
+    Cvttsd2si(AsmType, Operand, Operand),
+    Cvtsi2sd(AsmType, Operand, Operand),
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +86,7 @@ pub enum BinaryOp {
     Add,
     Sub,
     Mult,
+    DivDouble,
     Sal,
     Sar,
     Shr,
@@ -105,6 +117,22 @@ pub enum Register {
     R10,
     R11,
     SP,
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7,
+    XMM7,
+    XMM7,
+    XMM7,
+    XMM7,
+    XMM7,
+    XMM7,
+    XMM7,
+    XMM7,
 }
 
 #[derive(Debug,Clone)]
