@@ -52,21 +52,21 @@ pub fn get_static_init(constant: Const) -> StaticInit {
 }
 
 pub fn convert_constant(constant: Const, into: Type) -> Const {
-    match (constant, into) {
-        (Const::Int(i), Type::Long) => Const::Long(i as i64),
-        (Const::Long(i), Type::Int) => Const::Int(i as i32),
-        (Const::Int(i), Type::UInt) => Const::UInt(i as u32),
-        (Const::Int(i), Type::ULong) => Const::ULong(i as u64),
-        (Const::Long(i), Type::UInt) => Const::UInt(i as u32),
-        (Const::Long(i), Type::ULong) => Const::ULong(i as u64),
-        (Const::UInt(i), Type::Int) => Const::Int(i as i32),
-        (Const::UInt(i), Type::Long) => Const::Long(i as i64),
-        (Const::ULong(i), Type::Int) => Const::Int(i as i32),
-        (Const::ULong(i), Type::Long) => Const::Long(i as i64),
-        (c, _) => c,
+    let value = match constant {
+        Const::Int(v) => v as u128,
+        Const::Long(v) => v as u128,
+        Const::UInt(v) => v as u128,
+        Const::ULong(v) => v as u128,
+    };
+    match into {
+        Type::Int => Const::Int(value as i32),
+        Type::Long => Const::Long(value as i64),
+        Type::UInt => Const::UInt(value as u32),
+        Type::ULong => Const::ULong(value as u64),
+        Type::FuncType { .. } => unreachable!()
     }
 }
-
+                         
 pub fn is_static<T: HasStorage>(decl: &T) -> bool {
     decl.storage_class() == Some(StorageClass::Static)
 }

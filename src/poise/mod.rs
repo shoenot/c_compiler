@@ -168,14 +168,12 @@ fn gen_inst_var_declaration(
         let val = emit_expression(exp, instructions, symbols, count);
         let s = get_type(exp);
         let d = symbols.get(&declaration.identifier).unwrap().datatype.clone();
-        let val = if s != d {
-            let tmp = count.new_var(d.clone(), symbols);
+        let tmp = count.new_var(d.clone(), symbols);
+        let val = {
             if s.size() == d.size() { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
             else if s.size() > d.size() { instructions.push(PoiseInstruction::Truncate { src: val, dst: tmp.clone() }); tmp }
             else if s.is_signed() { instructions.push(PoiseInstruction::SignExtend { src: val, dst: tmp.clone() }); tmp }
             else { instructions.push(PoiseInstruction::ZeroExtend { src: val, dst: tmp.clone() }); tmp }
-        } else {
-            val
         };
         instructions.push(PoiseInstruction::Copy { src: val, dst: PoiseVal::Variable(declaration.identifier.clone()) });
     }
