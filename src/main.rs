@@ -26,7 +26,9 @@ struct Args {
     #[arg(long)]
     codegen: bool,
     #[arg(short)]
-    c: bool
+    c: bool,
+    #[arg(short = 'l', action = clap::ArgAction::Append)]
+    l: Vec<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

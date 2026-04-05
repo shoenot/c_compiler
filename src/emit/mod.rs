@@ -1,4 +1,6 @@
 use std::fmt;
+use ordered_float::OrderedFloat;
+
 use crate::codegen::*;
 use crate::types::*;
 
@@ -30,6 +32,7 @@ impl AsmType {
             AsmType::Byte => "b",
             AsmType::Longword => "l",
             AsmType::Quadword => "q",
+            AsmType::Double => "sd",
         }
     }
 }
@@ -42,37 +45,59 @@ impl fmt::Display for AsmType {
 
 pub fn emit_program(program: AsmProgram, symbols: &mut AsmSymbolTable)-> Result<String, EmissionError> {
     let mut output = String::new();
+    let mut z_vars = String::new();
+    let mut nz_vars = String::new();
+    let mut constants = String::new();
     for item in program.top_level {
         match item {
             AsmTopLevel::F(f) => emit_function(f, &mut output, symbols)?,
-            AsmTopLevel::V(v) => emit_var(v, &mut output)?,
+            AsmTopLevel::V(v) => emit_var(v, &mut z_vars, &mut nz_vars)?,
+            AsmTopLevel::C(c) => emit_constant(c, &mut constants)?,
         }
     }
+    if z_vars.len() > 0 { output.push_str("\t.bss\n"); output.push_str(&z_vars) }
+    if nz_vars.len() > 0 { output.push_str("\t.data\n"); output.push_str(&nz_vars) }
+    if constants.len() > 0 { output.push_str("\t.section .rodata\n"); output.push_str(&constants) }
     output.push_str("\n.section .note.GNU-stack,\"\",@progbits");
     Ok(output)
 }
 
-fn emit_staticinit(init: StaticInit) -> String {
+fn emit_staticinit(init: StaticInit) -> (String, bool) {
     match init {
-        StaticInit::IntInit(0) => String::from(".zero 4"),
-        StaticInit::IntInit(i) => String::from(format!(".long {}", i)),
-        StaticInit::LongInit(0) => String::from(".zero 8"),
-        StaticInit::LongInit(i) => String::from(format!(".quad {}", i)),
-        StaticInit::UIntInit(0) => String::from(".zero 4"),
-        StaticInit::UIntInit(i) => String::from(format!(".long {}", i)),
-        StaticInit::ULongInit(0) => String::from(".zero 8"),
-        StaticInit::ULongInit(i) => String::from(format!(".quad {}", i)),
+        StaticInit::IntInit(0) => (String::from(".zero 4"), false),
+        StaticInit::IntInit(i) => (String::from(format!(".long {}", i)), true),
+        StaticInit::LongInit(0) => (String::from(".zero 8"), false),
+        StaticInit::LongInit(i) => (String::from(format!(".quad {}", i)), true),
+        StaticInit::UIntInit(0) => (String::from(".zero 4"), false),
+        StaticInit::UIntInit(i) => (String::from(format!(".long {}", i)), true),
+        StaticInit::ULongInit(0) => (String::from(".zero 8"), false),
+        StaticInit::ULongInit(i) => (String::from(format!(".quad {}", i)), true),
+        StaticInit::DoubleInit(i) => {
+            let bits = i.into_inner().to_bits();
+            (String::from(format!(".quad {}", bits)), true)
+        }
     }
 }
 
-fn emit_var(var: AsmStaticVar, output: &mut String) -> Result<(), EmissionError> {
+fn emit_var(var: AsmStaticVar, zero: &mut String, nonzero: &mut String) -> Result<(), EmissionError> {
+    let mut output = String::new();
     if var.global {
         output.push_str(&format!("\t.globl {}\n", var.identifier));
     }
-    output.push_str("\t.data\n");
     output.push_str(&format!("\t.align {}\n", var.alignment));
     output.push_str(&format!("{}:\n", var.identifier));
-    output.push_str(&format!("\t{}\n", emit_staticinit(var.init)));
+    let (init, nz) = emit_staticinit(var.init);
+    output.push_str(&format!("\t{}\n", init));
+    if nz { nonzero.push_str(&output) } else { zero.push_str(&output) }
+    Ok(())
+}
+
+fn emit_constant(constant: StaticConstant, cons: &mut String) -> Result<(), EmissionError> {
+    cons.push_str(&format!("\t.align {}\n", constant.alignment));
+    cons.push_str(&format!("{}:\n", constant.identifier));
+    let StaticInit::DoubleInit(val) = constant.init else { unreachable!() };
+    let bits = val.into_inner().to_bits();
+    cons.push_str(&format!("\t.quad {}\n", bits));
     Ok(())
 }
 
@@ -108,15 +133,25 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
             output.push_str(&format!("\t{op}{}\t{dst}\n", t.suffix()));
         },
         AsmInstruction::Binary(binary_op, t, operand1, operand2) => {
-            let src = emit_operand(operand1)?;
-            let dst = emit_operand(operand2)?;
+            // println!("BINARY: Binary(op:{:?}, t:{:?}, src:{:?}, dst:{:?}", binary_op, t, operand1, operand2);
+            let src = emit_operand(operand1.clone())?;
+            let dst = emit_operand(operand2.clone())?;
             let op = emit_binary_op(binary_op);
-            output.push_str(&format!("\t{op}{}\t{src},\t{dst}\n", t.suffix()));
+            match (t, binary_op) {
+                (AsmType::Double, BinaryOp::Mult) => output.push_str(&format!("\tmulsd\t{src},\t{dst}\n")),
+                (AsmType::Double, BinaryOp::BitXor) => output.push_str(&format!("\txorpd\t{src},\t{dst}\n")),
+                (AsmType::Double, BinaryOp::DivDouble) => output.push_str(&format!("\tdivsd\t{src},\t{dst}\n")),
+                (_, _) => output.push_str(&format!("\t{op}{}\t{src},\t{dst}\n", t.suffix())),
+            }
         },
         AsmInstruction::Cmp(t, operand1, operand2) => {
             let src = emit_operand(operand1)?;
             let dst = emit_operand(operand2)?;
-            output.push_str(&format!("\tcmp{}\t{src},\t{dst}\n", t.suffix()));
+            if matches!(t, AsmType::Double) {
+                output.push_str(&format!("\tcomisd\t{src},\t{dst}\n"));
+            } else {
+                output.push_str(&format!("\tcmp{}\t{src},\t{dst}\n", t.suffix()));
+            }
         },
         AsmInstruction::SetCC(cond_code, dst) => {
             let op = emit_conditional_op(CondOp::Set, cond_code);
@@ -138,7 +173,7 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
             output.push_str(&format!("\tdiv{}\t{op}\n", t.suffix()));
         },
         AsmInstruction::Cdq(AsmType::Byte) => {
-            output.push_str("\tcbtw\n");
+            unreachable!();
         },
         AsmInstruction::Cdq(AsmType::Longword) => {
             output.push_str("\tcltd\n");
@@ -157,11 +192,21 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
         },
         AsmInstruction::Call(id) => {
             let mut name = id.clone();
-            let Some(AsmSymbol::FuncEntry(global)) = symbols.get(&id) else { unreachable!() };
-            if !global {
+            let Some(AsmSymbol::FuncEntry(defined)) = symbols.get(&id) else { unreachable!() };
+            if !defined {
                 name.push_str("@PLT");
             }
             output.push_str(&format!("\tcall\t{name}\n"));
+        },
+        AsmInstruction::Cvtsi2sd(t, src, dst) => {
+            let src = emit_operand(src)?;
+            let dst = emit_operand(dst)?;
+            output.push_str(&format!("\tcvtsi2sd{}\t{src},\t{dst}\n", t.suffix()));
+        },
+        AsmInstruction::Cvttsd2si(t, src, dst) => {
+            let src = emit_operand(src)?;
+            let dst = emit_operand(dst)?;
+            output.push_str(&format!("\tcvttsd2si{}\t{src},\t{dst}\n", t.suffix()));
         },
         _ => unreachable!(),
     }
@@ -194,16 +239,32 @@ fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
         Operand::Reg(reg, regsize) => {
             let n = regsize as usize;
             let rstr = match reg {
-                Register::AX => ["al", "eax", "rax"][n],
-                Register::CX => ["cl", "ecx", "rcx"][n],
-                Register::DX => ["dl", "edx", "rdx"][n],
-                Register::DI => ["dil", "edi", "rdi"][n],
-                Register::SI => ["sil", "esi", "rsi"][n],
-                Register::R8 => ["r8b", "r8d", "r8"][n],
-                Register::R9 => ["r9b", "r9d", "r9"][n],
-                Register::R10 => ["r10b", "r10d", "r10"][n],
-                Register::R11 => ["r11b", "r11d", "r11"][n],
-                Register::SP => "rsp",
+                Register::AX   => ["al", "eax", "rax"][n],
+                Register::CX   => ["cl", "ecx", "rcx"][n],
+                Register::DX   => ["dl", "edx", "rdx"][n],
+                Register::DI   => ["dil", "edi", "rdi"][n],
+                Register::SI   => ["sil", "esi", "rsi"][n],
+                Register::R8   => ["r8b", "r8d", "r8"][n],
+                Register::R9   => ["r9b", "r9d", "r9"][n],
+                Register::R10  => ["r10b", "r10d", "r10"][n],
+                Register::R11  => ["r11b", "r11d", "r11"][n],
+                Register::SP   => "rsp",
+                Register::XMM0  => "xmm0",
+                Register::XMM1  => "xmm1",
+                Register::XMM2  => "xmm2",
+                Register::XMM3  => "xmm3",
+                Register::XMM4  => "xmm4",
+                Register::XMM5  => "xmm5",
+                Register::XMM6  => "xmm6",
+                Register::XMM7  => "xmm7",
+                Register::XMM8  => "xmm8",
+                Register::XMM9  => "xmm9",
+                Register::XMM10 => "xmm10",
+                Register::XMM11 => "xmm11",
+                Register::XMM12 => "xmm12",
+                Register::XMM13 => "xmm13",
+                Register::XMM14 => "xmm14",
+                Register::XMM15 => "xmm15",
             };
             Ok(format!("%{rstr}"))
         },
@@ -232,5 +293,6 @@ fn emit_binary_op(binary_op: BinaryOp) -> &'static str {
         BinaryOp::BitAnd    => "and",
         BinaryOp::BitOr     => "or",
         BinaryOp::BitXor    => "xor",
+        BinaryOp::DivDouble => "divsd",
     }
 }

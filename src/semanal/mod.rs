@@ -48,6 +48,9 @@ pub enum SemanticError {
     LocalStaticVarNonConstantInit(String, Span),
     InitializerOnLocalExtern(String, Span),
     NonGlobalStaticFunc(String, Span),
+    ComplementFloat(Span),
+    RemainderFloat(Span),
+    FloatUsedInCase(Span),
 }
 
 impl fmt::Display for SemanticError {
@@ -77,6 +80,9 @@ impl fmt::Display for SemanticError {
             SemanticError::LocalStaticVarNonConstantInit(n, s) => write!(f, "Local static variable with non-constant init '{}' at {}", n, s),
             SemanticError::InitializerOnLocalExtern(n, s) => write!(f, "Init on local external variable '{}' at {}", n, s),
             SemanticError::NonGlobalStaticFunc(n, s) => write!(f, "Non global static function '{}' at {}", n, s),
+            SemanticError::ComplementFloat(s) => write!(f, "Tried to take bitwise complement of float at {}", s),
+            SemanticError::RemainderFloat(s) => write!(f, "Tried to take remainder of float at {}", s),
+            SemanticError::FloatUsedInCase(s) => write!(f, "Float used in case statement at {}", s),
         }
     }
 }

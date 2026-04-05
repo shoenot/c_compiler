@@ -97,8 +97,14 @@ fn run_semanal(program: &mut Program, symbols: &mut SymbolTable, args: &crate::A
                 }
             }
         }
-        println!("{:#?}", var_map);
-        println!("{:#?}", symbols);
+        println!("--------------- VAR MAP ---------------");
+        for item in var_map {
+            println!("{:?}", item);
+        }
+        println!("--------------- SYMBOLS ---------------");
+        for item in symbols {
+            println!("{:?}", item);
+        }
         std::process::exit(0);
     }
     Ok(())
@@ -107,6 +113,7 @@ fn run_semanal(program: &mut Program, symbols: &mut SymbolTable, args: &crate::A
 fn run_poise(program: Program, symbols: &mut SymbolTable, args: &crate::Args) -> PoiseProg {
     let poise = gen_poise(&program, symbols);
     if args.tacky {
+        let mut vars = Vec::new();
         for item in poise.top_level_items  {
             match item {
                 TopLevelItem::F(f) => {
@@ -116,20 +123,32 @@ fn run_poise(program: Program, symbols: &mut SymbolTable, args: &crate::Args) ->
                     for instruction in f.body {
                         println!("{:?}", instruction);
                     }
+                    println!("\n");
                 },
                 TopLevelItem::V(v) => {
-                    println!("Top Level Variable: {:?}", v);
+                    vars.push(v);
                 }
             }
+        }
+        println!("------------- STATIC VARS -------------");
+        for item in vars {
+            println!("Top Level Variable: {:?}", item);
+        }
+        println!("\n");
+        println!("--------------- SYMBOLS ---------------");
+        for item in symbols {
+            println!("{:?}", item);
         }
         std::process::exit(0);
     }
     poise
 }
 
-fn run_codegen(program: PoiseProg, symbols: &mut SymbolTable, asm_symbols: &mut AsmSymbolTable, args: &crate::Args) -> AsmProgram {
-    let asm = gen_program(program, symbols, asm_symbols);
+fn run_codegen(program: PoiseProg, symbols:SymbolTable, asm_symbols: AsmSymbolTable, args: &crate::Args) -> (AsmProgram, AsmSymbolTable) {
+    let (asm, asm_symbols) = gen_program(program, symbols.clone(), asm_symbols);
     if args.codegen {
+        let mut vars = Vec::new();
+        let mut floats = Vec::new();
         for item in asm.top_level  {
             match item {
                 AsmTopLevel::F(f) => {
@@ -138,17 +157,37 @@ fn run_codegen(program: PoiseProg, symbols: &mut SymbolTable, asm_symbols: &mut 
                     for instruction in f.body {
                         println!("{:?}", instruction);
                     }
+                    println!("\n");
                 },
                 AsmTopLevel::V(v) => {
-                    println!("Top Level Variable: {:?}", v);
+                    vars.push(v);
+                }
+                AsmTopLevel::C(c) => {
+                    floats.push(c);
                 }
             }
         }
+        println!("------------- STATIC VARS -------------");
+        for item in vars {
+            println!("Top Level Variable: {:?}", item);
+        }
+        println!("\n");
+        println!("--------------- FLOATS ----------------");
+        for item in floats {
+            println!("Float constant: {:?}", item);
+        }
+        println!("--------------- SYMBOLS ---------------");
+        for item in symbols {
+            println!("{:?}", item);
+        }
+        println!("------------- ASM SYMBOLS -------------");
+        for item in asm_symbols {
+            println!("{:?}", item);
+        }
         std::process::exit(0);
     }
-    asm
+    (asm, asm_symbols)
 }
-
 
 fn run_emitter(asm_program: AsmProgram, symbols: &mut AsmSymbolTable, output_file: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
     fs::write(&output_file, emit_program(asm_program, symbols)?)?;
@@ -158,13 +197,13 @@ fn run_emitter(asm_program: AsmProgram, symbols: &mut AsmSymbolTable, output_fil
 pub fn run_compiler(input_file: &Path, args: crate::Args) -> Result<PathBuf, Box<dyn Error>> {
     let preprocessed = input_file;
     let mut symbols = HashMap::new();
-    let mut asm_symbols = HashMap::new();
+    let asm_symbols = HashMap::new();
 
     let lexed = run_lexer(preprocessed, &args)?;
     let mut parsed = run_parser(lexed, &args)?;
     run_semanal(&mut parsed, &mut symbols, &args)?;
     let poise = run_poise(parsed, &mut symbols, &args);
-    let asm = run_codegen(poise, &mut symbols, &mut asm_symbols, &args);
+    let (asm, mut asm_symbols) = run_codegen(poise, symbols, asm_symbols, &args);
 
     let mut output_file = input_file.to_path_buf();
     output_file.set_extension("s");

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use crate::types::*;
-use crate::codegen::AsmType;
+use crate::codegen::{AsmTopLevel, AsmType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AsmSymbol {
-    ObjEntry(AsmType, bool),
+    ObjEntry(AsmType, bool, bool),
     FuncEntry(bool),
 }
 
@@ -17,6 +17,7 @@ pub fn convert_type(dtype: &Type) -> AsmType {
         Type::Long => AsmType::Quadword,
         Type::UInt => AsmType::Longword,
         Type::ULong => AsmType::Quadword,
+        Type::Double => AsmType::Double,
         _ => unreachable!(),
     }
 }
@@ -30,16 +31,21 @@ fn convert_symbol(symbol: &Symbol) -> AsmSymbol {
         other => {
             let asmtype = convert_type(&other);
             if let IdentAttrs::StaticAttr { .. } = symbol.attrs {
-                AsmSymbol::ObjEntry(asmtype, true)
+                AsmSymbol::ObjEntry(asmtype, true, false)
             } else {
-                AsmSymbol::ObjEntry(asmtype, false)
+                AsmSymbol::ObjEntry(asmtype, false, false)
             }
         },
     }
 }
 
-pub fn convert_symtable(symbols: &SymbolTable, asm_symbols: &mut AsmSymbolTable) {
+pub fn convert_symtable(symbols: &SymbolTable, asm_symbols: &mut AsmSymbolTable, constants: &Vec<AsmTopLevel>) {
     for (_, sym) in symbols {
         asm_symbols.insert(sym.ident.clone(), convert_symbol(sym));
+    }
+    for item in constants {
+        let AsmTopLevel::C(constant) = item else { unreachable!() };
+        let asmsym = AsmSymbol::ObjEntry(AsmType::Double, true, true);
+        asm_symbols.insert(constant.identifier.clone(), asmsym);
     }
 }

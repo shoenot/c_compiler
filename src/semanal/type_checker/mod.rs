@@ -1,4 +1,5 @@
 use std::iter::zip;
+use ordered_float::OrderedFloat;
 
 use super::*;
 use visitor_trait::*;
@@ -28,9 +29,9 @@ fn set_type(expr: &mut Expression, expression_type: Type) -> Type {
 }
 
 fn get_common_type(t1: Type, t2: Type) -> Type {
-    if t1 == t2 {
-        t1
-    } else if t1.size() == t2.size() {
+    if t1 == t2 { t1 } 
+    else if t1 == Type::Double || t2 == Type::Double { Type::Double }
+    else if t1.size() == t2.size() {
         if t1.is_signed() { t2 } else { t1 }
     } else if t1.size() > t2.size() { t1 } else { t2 }
 }
@@ -42,12 +43,23 @@ fn convert_type(expr: &mut Expression, datatype: Type) {
     }
 }
 
+pub fn dump_static_init(init: StaticInit) -> Const {
+    match init {
+        StaticInit::LongInit(i)     => Const::Long(i),
+        StaticInit::IntInit(i)      => Const::Int(i),
+        StaticInit::UIntInit(i)     => Const::UInt(i),
+        StaticInit::ULongInit(i)    => Const::ULong(i),
+        StaticInit::DoubleInit(i)   => Const::Double(i),
+    }
+}
+
 pub fn get_static_init(constant: Const) -> StaticInit {
     match constant {
-        Const::Long(i) => StaticInit::LongInit(i),
-        Const::Int(i) => StaticInit::IntInit(i),
-        Const::UInt(i) => StaticInit::UIntInit(i),
-        Const::ULong(i) => StaticInit::ULongInit(i),
+        Const::Long(i)      => StaticInit::LongInit(i),
+        Const::Int(i)       => StaticInit::IntInit(i),
+        Const::UInt(i)      => StaticInit::UIntInit(i),
+        Const::ULong(i)     => StaticInit::ULongInit(i),
+        Const::Double(i)    => StaticInit::DoubleInit(i),
     }
 }
 
@@ -57,12 +69,20 @@ pub fn convert_constant(constant: Const, into: Type) -> Const {
         Const::Long(v) => v as u128,
         Const::UInt(v) => v as u128,
         Const::ULong(v) => v as u128,
+        Const::Double(OrderedFloat(v)) => {
+            if matches!(into, Type::Double) {
+                return constant;
+            } else {
+                v as u128
+            }
+        },
     };
     match into {
         Type::Int => Const::Int(value as i32),
         Type::Long => Const::Long(value as i64),
         Type::UInt => Const::UInt(value as u32),
         Type::ULong => Const::ULong(value as u64),
+        Type::Double => Const::Double(OrderedFloat(value as f64)),
         Type::FuncType { .. } => unreachable!()
     }
 }
@@ -80,7 +100,9 @@ impl<'a> TypeChecker<'a> {
         let mut initial_value = match &decl.init {
             Some(expr) => {
                 if let ExpressionKind::Constant(i) = expr.kind {
+                    println!("old: {:?}", i);
                     let new = convert_constant(i, decl.var_type.clone());
+                    println!("new: {:?}", new);
                     let static_init = get_static_init(new);
                     InitialValue::Initial(static_init)
                 } else {
@@ -180,6 +202,7 @@ impl<'a> TypeChecker<'a> {
                     Const::Long(_) => Ok(set_type(expr, Type::Long)),
                     Const::UInt(_) => Ok(set_type(expr, Type::UInt)),
                     Const::ULong(_) => Ok(set_type(expr, Type::ULong)),
+                    Const::Double(_) => Ok(set_type(expr, Type::Double)),
                 }
             },
             ExpressionKind::Cast(t, factor) => {
@@ -189,10 +212,14 @@ impl<'a> TypeChecker<'a> {
             },
             ExpressionKind::Unary(op, inner) => {
                 let inner_exp = self.type_expression(inner)?;
-                if *op == UnaryOp::Not {
-                    Ok(set_type(expr, Type::Int))
+                if inner.expression_type == Some(Type::Double) && matches!(op, UnaryOp::Complement) {
+                    Err(SemanticError::ComplementFloat(expr.span))
                 } else {
-                    Ok(set_type(expr, inner_exp))
+                    if *op == UnaryOp::Not {
+                        Ok(set_type(expr, Type::Int))
+                    } else {
+                        Ok(set_type(expr, inner_exp))
+                    }
                 }
             },
             ExpressionKind::Binary(op, exp1, exp2) => {
@@ -213,7 +240,11 @@ impl<'a> TypeChecker<'a> {
                     } else if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
                         Ok(set_type(expr, exp1_type))
                     } else {
-                        Ok(set_type(expr, common_type))
+                        if matches!(op, BinaryOp::Remainder) && matches!(common_type, Type::Double) {
+                            Err(SemanticError::RemainderFloat(expr.span))
+                        } else {
+                            Ok(set_type(expr, common_type))
+                        }
                     }
                 } 
             },
@@ -351,3 +382,6 @@ pub fn type_checking_pass(program: &mut Program, symbols: &mut SymbolTable) -> R
     let mut checker = TypeChecker { symbols, scope_depth: 0, current_function_type: None };
     checker.visit_program(program)
 }
+
+#[cfg(test)]
+mod tests;

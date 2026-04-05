@@ -26,13 +26,18 @@ pub fn run_preprocessor(input_file: &Path) -> Result<PathBuf, DriverError> {
 pub fn run_assembler(input_file: &Path, args: crate::Args) -> Result<PathBuf, DriverError> {
     let mut output_file = input_file.to_path_buf();
     output_file.set_extension("");
-    let mut gcc_args = vec![];
+    let mut gcc_args: Vec<String> = vec![];
     if args.c {
-        gcc_args.push("-c");
+        gcc_args.push(String::from("-c"));
         output_file.set_extension("o");
     }
-    gcc_args.push(input_file.to_str().unwrap());
-    gcc_args.append(&mut vec!["-o", &output_file.to_str().unwrap()]);
+    gcc_args.push(String::from(input_file.to_str().unwrap()));
+    gcc_args.append(&mut vec![String::from("-o"), String::from(output_file.to_str().unwrap())]);
+    if args.l.len() > 0 {
+        for lib in args.l {
+            gcc_args.push(format!("-l{}", lib));
+        }
+    }
     match Command::new("gcc")
         .args(gcc_args)
         .output() {

@@ -1,4 +1,5 @@
 use std::ops::{Deref, DerefMut};
+use ordered_float::OrderedFloat;
 use crate::types::Type;
 use crate::lexer::Span;
 
@@ -181,6 +182,7 @@ pub enum Const {
     Long(i64),
     UInt(u32),
     ULong(u64),
+    Double(OrderedFloat<f64>),
 }
 
 impl Deref for Expression {

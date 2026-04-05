@@ -3,6 +3,7 @@ use crate::types::*;
 use crate::parser::Const;
 use crate::semanal::type_checker::{
     get_static_init, 
+    dump_static_init,
     convert_constant,
 };
 
@@ -40,6 +41,10 @@ pub enum PoiseInstruction {
     SignExtend{src: PoiseVal, dst: PoiseVal},
     Truncate{src: PoiseVal, dst: PoiseVal},
     ZeroExtend{src: PoiseVal, dst: PoiseVal},
+    DoubleToInt{src: PoiseVal, dst: PoiseVal},
+    DoubleToUInt{src: PoiseVal, dst: PoiseVal},
+    IntToDouble{src: PoiseVal, dst: PoiseVal},
+    UIntToDouble{src: PoiseVal, dst: PoiseVal},
     Unary{op: PoiseUnaryOp, src: PoiseVal, dst: PoiseVal},
     Binary{op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseVal},
     Copy{src: PoiseVal, dst:PoiseVal},
@@ -50,7 +55,7 @@ pub enum PoiseInstruction {
     FunctionCall{ident: String, args: Vec<PoiseVal>, dst: PoiseVal}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PoiseVal {
     Constant(Const),
     Variable(String),
@@ -170,7 +175,14 @@ fn gen_inst_var_declaration(
         let d = symbols.get(&declaration.identifier).unwrap().datatype.clone();
         let tmp = count.new_var(d.clone(), symbols);
         let val = {
-            if s.size() == d.size() { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
+            if s == d { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
+            else if s == Type::Double {
+                if d.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: val, dst: tmp.clone() }); tmp }
+                else { instructions.push(PoiseInstruction::DoubleToUInt { src: val, dst: tmp.clone() }); tmp }
+            } else if d == Type::Double {
+                if s.is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: val, dst: tmp.clone() }); tmp }
+                else { instructions.push(PoiseInstruction::UIntToDouble { src: val, dst: tmp.clone() }); tmp }
+            } else if s.size() == d.size() { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
             else if s.size() > d.size() { instructions.push(PoiseInstruction::Truncate { src: val, dst: tmp.clone() }); tmp }
             else if s.is_signed() { instructions.push(PoiseInstruction::SignExtend { src: val, dst: tmp.clone() }); tmp }
             else { instructions.push(PoiseInstruction::ZeroExtend { src: val, dst: tmp.clone() }); tmp }
@@ -380,6 +392,14 @@ fn emit_expression(
             let var = emit_expression(e, instructions, symbols, count);
             if *t == get_type(e) {
                 var
+            } else if *t == Type::Double {
+                let dst = count.new_var(t.clone(), symbols);
+                if get_type(e).is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: var, dst: dst.clone() }); dst }
+                else { instructions.push(PoiseInstruction::UIntToDouble { src: var, dst: dst.clone() }); dst }
+            } else if get_type(e) == Type::Double {
+                let dst = count.new_var(t.clone(), symbols);
+                if t.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: var, dst: dst.clone() }); dst }
+                else { instructions.push(PoiseInstruction::DoubleToUInt { src: var, dst: dst.clone() }); dst }
             } else {
                 let dst = count.new_var(t.clone(), symbols);
                 if t.size() == get_type(e).size() { instructions.push(PoiseInstruction::Copy { src: var, dst: dst.clone() }); return dst }
@@ -458,12 +478,10 @@ fn emit_short_circuit_exp(op: &parser::BinaryOp,
     match op {
         parser::BinaryOp::LogicalAnd => {
             let v1 = emit_expression(exp1, instructions, symbols, count);
-            instructions.push(PoiseInstruction::Copy{src: v1.clone(), dst: dst.clone()});
-            instructions.push(PoiseInstruction::JumpIfZero { condition: dst.clone(), identifier: false_label.clone() });
+            instructions.push(PoiseInstruction::JumpIfZero { condition: v1.clone(), identifier: false_label.clone() });
 
             let v2 = emit_expression(exp2, instructions, symbols, count);
-            instructions.push(PoiseInstruction::Copy{src: v2.clone(), dst: dst.clone()});
-            instructions.push(PoiseInstruction::JumpIfZero { condition: dst.clone(), identifier: false_label.clone() });
+            instructions.push(PoiseInstruction::JumpIfZero { condition: v2.clone(), identifier: false_label.clone() });
 
             instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(1)), dst: dst.clone()});
             instructions.push(PoiseInstruction::Jump(true_label.clone()));
@@ -474,12 +492,10 @@ fn emit_short_circuit_exp(op: &parser::BinaryOp,
         },
         parser::BinaryOp::LogicalOr => {
             let v1 = emit_expression(exp1, instructions, symbols, count);
-            instructions.push(PoiseInstruction::Copy{src: v1.clone(), dst: dst.clone()});
-            instructions.push(PoiseInstruction::JumpIfNotZero { condition: dst.clone(), identifier: true_label.clone() });
+            instructions.push(PoiseInstruction::JumpIfNotZero { condition: v1.clone(), identifier: true_label.clone() });
 
             let v2 = emit_expression(exp2, instructions, symbols, count);
-            instructions.push(PoiseInstruction::Copy{src: v2.clone(), dst: dst.clone()});
-            instructions.push(PoiseInstruction::JumpIfNotZero { condition: dst.clone(), identifier: true_label.clone() });
+            instructions.push(PoiseInstruction::JumpIfNotZero { condition: v2.clone(), identifier: true_label.clone() });
 
             instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(0)), dst: dst.clone()});
             instructions.push(PoiseInstruction::Jump(false_label.clone()));
@@ -498,12 +514,14 @@ fn gen_static_symbols(symbols: &SymbolTable) -> Vec<TopLevelItem> {
         let var_type = &v.datatype;
         if let IdentAttrs::StaticAttr { init, global } = &v.attrs {
             match init {
-                InitialValue::Initial(v) => defs.push(TopLevelItem::V(PoiseStaticVar { 
-                    identifier: k.clone(), 
-                    datatype: var_type.clone(),
-                    global:*global, 
-                    init: v.clone() 
-                })),
+                InitialValue::Initial(v) => {
+                    defs.push(TopLevelItem::V(PoiseStaticVar { 
+                        identifier: k.clone(), 
+                        datatype: var_type.clone(),
+                        global:*global, 
+                        init: v.clone(), 
+                    }));
+                },
                 InitialValue::Tentative => {
                     let val = convert_constant(Const::Int(0), var_type.clone());
                     defs.push(TopLevelItem::V(PoiseStaticVar { 

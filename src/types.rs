@@ -1,4 +1,5 @@
 use std::collections::hash_map::HashMap;
+use ordered_float::OrderedFloat;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -6,6 +7,7 @@ pub enum Type {
     Long,
     UInt,
     ULong,
+    Double,
     FuncType{params: Vec<Box<Type>>, ret: Box<Type>},
 }
 
@@ -16,6 +18,7 @@ impl Type {
             Type::UInt => 32,
             Type::Long => 64,
             Type::ULong => 64,
+            Type::Double => unreachable!(),
             Type::FuncType { .. } => unreachable!(),
         }
     }
@@ -26,6 +29,7 @@ impl Type {
             Type::UInt => false,
             Type::Long => true,
             Type::ULong => false,
+            Type::Double => unreachable!(),
             Type::FuncType { .. } => unreachable!(),
         }
     }
@@ -54,12 +58,13 @@ pub enum InitialValue {
     NoInitializer,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StaticInit {
     IntInit(i32),
     LongInit(i64),
     UIntInit(u32),
     ULongInit(u64),
+    DoubleInit(OrderedFloat<f64>),
 }
 
 impl IdentAttrs {

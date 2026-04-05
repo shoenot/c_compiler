@@ -4,7 +4,8 @@ use std::collections::hash_map::HashMap;
 pub fn assign_stack_slots(funcs: Vec<AsmFunction>, symbols: &AsmSymbolTable) -> Vec<AsmFunction> {
     let mut functions = Vec::new();
     for func in funcs {
-        functions.push(assign_func_slots(func, symbols));
+        let mut fixer = OpFixer::new(func, &symbols);
+        functions.push(fixer.assign_slots());
     }
     functions
 }
@@ -14,212 +15,312 @@ fn get_size(asmtype: &AsmType) -> i32 {
         AsmType::Byte => 1,
         AsmType::Longword => 4,
         AsmType::Quadword => 8,
+        AsmType::Double => 8,
     }
 }
 
-fn assign_func_slots(func: AsmFunction, symbols: &AsmSymbolTable) -> AsmFunction {
-    let mut map: HashMap<String, i32> = HashMap::new();
-    let mut new_instructions = Vec::new();
-    let mut offset: i32 = 0;
-    for instruction in func.body {
-        match instruction {
-            AsmInstruction::Ret => new_instructions.push(AsmInstruction::Ret),
-            AsmInstruction::Mov(asmtype, src, dst)  => {
-                let src = resolve_operand(src, &mut map, &mut offset, symbols);
-                let dst = resolve_operand(dst, &mut map, &mut offset, symbols);
-                let regsize = get_regsize(&asmtype);
-                match (&src, &dst) {
-                   (Operand::Stack(_) | Operand::Data(_), Operand::Stack(_) | Operand::Data(_)) => {
-                        new_instructions.push(AsmInstruction::Mov(asmtype.clone(), src, Operand::Reg(Register::R10, regsize.clone())));
-                        new_instructions.push(AsmInstruction::Mov(asmtype, Operand::Reg(Register::R10, regsize), dst));
-                   },
-                   (Operand::Imm(v), Operand::Stack(_) | Operand::Data(_)) => {
-                       if i32::try_from(*v).is_err() && asmtype == AsmType::Quadword {
-                           new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, src, Operand::Reg(Register::R10, RegSize::Quad)));
-                           new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, Operand::Reg(Register::R10, RegSize::Quad), dst));
-                       } else {
-                           new_instructions.push(AsmInstruction::Mov(asmtype, src, dst));
-                       }
-                   },
-                    _ => new_instructions.push(AsmInstruction::Mov(asmtype, src, dst)),
+enum Scratch{
+    Source,
+    Dest,
+}
+
+fn get_reg(asmtype: &AsmType, scratch: Scratch) -> Operand {
+    if matches!(asmtype, AsmType::Double) {
+        if matches!(scratch, Scratch::Source) { Operand::Reg(Register::XMM14, RegSize::Quad) } 
+        else { Operand::Reg(Register::XMM15, RegSize::Quad) }
+    } else {
+        if matches!(scratch, Scratch::Source) { Operand::Reg(Register::R10, get_regsize(asmtype)) } 
+        else { Operand::Reg(Register::R11, get_regsize(asmtype)) }
+    }
+}
+
+pub struct OpFixer<'a> {
+    pub old: AsmFunction,
+    pub symbols: &'a AsmSymbolTable,
+    pub new: Vec<AsmInstruction>,
+    pub offset: i32,
+    pub offset_map: HashMap<String, i32>,
+}
+
+impl<'a> OpFixer<'a> {
+    pub fn new(old: AsmFunction, symbols: &'a AsmSymbolTable) -> OpFixer<'a> {
+        OpFixer { old, symbols, new: Vec::new(), offset: 0, offset_map: HashMap::new() }
+    }
+
+    fn push(&mut self, inst: AsmInstruction) {
+        // println!("FIXED UP -> {:?}", inst);
+        self.new.push(inst);
+    }
+
+    fn res_op(&mut self, op: Operand) -> Operand {
+        match op {
+            Operand::Pseudo(ident) => {
+                let Some(AsmSymbol::ObjEntry(asmtype, is_static, false)) = self.symbols.get(&ident) else { unreachable!() };
+                if *is_static {
+                    return Operand::Data(ident); 
+                } else {
+                    let size = get_size(&asmtype);
+                    let stackoffset = self.offset_map.entry(ident).or_insert_with(|| { 
+                        self.offset -= size;
+                        self.offset = self.offset & !(get_alignment(&asmtype) as i32 - 1);
+                        self.offset
+                    });
+                    Operand::Stack(*stackoffset)
                 }
             },
-            AsmInstruction::Movsx(src, dst) => {
-                let src = resolve_operand(src, &mut map, &mut offset, symbols);
-                let dst = resolve_operand(dst, &mut map, &mut offset, symbols);
-                match (&src, &dst) {
-                   (Operand::Stack(_) | Operand::Data(_), Operand::Stack(_) | Operand::Data(_)) => {
-                        new_instructions.push(AsmInstruction::Movsx(src, Operand::Reg(Register::R10, RegSize::Quad)));
-                        new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, Operand::Reg(Register::R10, RegSize::Quad), dst));
-                   },
-                   (Operand::Imm(_), _) => {
-                        new_instructions.push(AsmInstruction::Mov(AsmType::Longword, src, Operand::Reg(Register::R11, RegSize::Long)));
-                        new_instructions.push(AsmInstruction::Movsx(Operand::Reg(Register::R11, RegSize::Long), Operand::Reg(Register::R10, RegSize::Quad)));
-                        new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, Operand::Reg(Register::R10, RegSize::Quad), dst));
-                   }
-                   _ => new_instructions.push(AsmInstruction::Movsx(src, dst)),
-                }
-            },
-            AsmInstruction::Unary(op, asmtype, dst) => new_instructions.push(
-                AsmInstruction::Unary(op, asmtype, resolve_operand(dst, &mut map, &mut offset, symbols))
-            ),
-            AsmInstruction::Binary(op, asmtype, src, dst) => {
-                let src = resolve_operand(src, &mut map, &mut offset, symbols);
-                let dst = resolve_operand(dst, &mut map, &mut offset, symbols);
-                let regsize = get_regsize(&asmtype);
-                match op {
-                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor |
-                    BinaryOp::Add | BinaryOp::Sub => {
-                       match (&src, &dst) {
-                           (Operand::Stack(_) | Operand::Data(_), Operand::Stack(_) | Operand::Data(_)) => {
-                               new_instructions.push(AsmInstruction::Mov(asmtype.clone(), src, Operand::Reg(Register::R10, regsize.clone())));
-                               new_instructions.push(AsmInstruction::Binary(op, asmtype, Operand::Reg(Register::R10, regsize), dst));
-                           },
-                           (Operand::Imm(v), _) => {
-                               if i32::try_from(*v).is_err() {
-                                   new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, src, Operand::Reg(Register::R10, RegSize::Quad)));
-                                   new_instructions.push(AsmInstruction::Binary(op, AsmType::Quadword, Operand::Reg(Register::R10, RegSize::Quad), dst));
-                               } else {
-                                   new_instructions.push(AsmInstruction::Binary(op, asmtype, src, dst));
-                               }
-                           },
-                           _ => new_instructions.push(AsmInstruction::Binary(op, asmtype, src, dst)),
-                       }
-                    },
-                    BinaryOp::Mult => {
-                        match (&src, &dst) {
-                            (Operand::Imm(v), Operand::Stack(_) | Operand::Data(_)) => {
-                                if i32::try_from(*v).is_err() {
-                                    new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, src, Operand::Reg(Register::R10, RegSize::Quad)));
-                                    new_instructions.push(AsmInstruction::Mov(asmtype.clone(), dst.clone(), Operand::Reg(Register::R11, regsize.clone())));
-                                    new_instructions.push(AsmInstruction::Binary(op, asmtype.clone(), Operand::Reg(Register::R10, RegSize::Quad), Operand::Reg(Register::R11, regsize.clone())));
-                                    new_instructions.push(AsmInstruction::Mov(asmtype, Operand::Reg(Register::R11, regsize), dst));
-                                } else {
-                                    new_instructions.push(AsmInstruction::Mov(asmtype.clone(), dst.clone(), Operand::Reg(Register::R11, regsize.clone())));
-                                    new_instructions.push(AsmInstruction::Binary(op, asmtype.clone(), src, Operand::Reg(Register::R11, regsize.clone())));
-                                    new_instructions.push(AsmInstruction::Mov(asmtype, Operand::Reg(Register::R11, regsize), dst));
-                                }
-                            },
-                            (_, Operand::Stack(_) | Operand::Data(_)) => {
-                                new_instructions.push(AsmInstruction::Mov(asmtype.clone(), dst.clone(), Operand::Reg(Register::R11, regsize.clone())));
-                                new_instructions.push(AsmInstruction::Binary(op, asmtype.clone(), src, Operand::Reg(Register::R11, regsize.clone())));
-                                new_instructions.push(AsmInstruction::Mov(asmtype, Operand::Reg(Register::R11, regsize), dst));
-                            },
-                            (Operand::Imm(v), _) => {
-                                if i32::try_from(*v).is_err() {
-                                    new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, src, Operand::Reg(Register::R10, RegSize::Quad)));
-                                    new_instructions.push(AsmInstruction::Binary(op, AsmType::Quadword, Operand::Reg(Register::R10, RegSize::Quad), dst));
-                                } else {
-                                    new_instructions.push(AsmInstruction::Binary(op, asmtype, src, dst));
-                                }
-                            },
-                            _ => new_instructions.push(AsmInstruction::Binary(op, asmtype, src, dst)),
-                        }
-                    },
-                    BinaryOp::Sal | BinaryOp::Sar | BinaryOp::Shl | BinaryOp::Shr  => {
-                        new_instructions.push(AsmInstruction::Binary(op, asmtype, src, dst));
-                    }
-                }
-            }
-            AsmInstruction::Idiv(asmtype, src) => {
-                 let src = resolve_operand(src, &mut map, &mut offset, symbols);
-                 let regsize = get_regsize(&asmtype);
-                 match &src {
-                     Operand::Imm(_) => {
-                         new_instructions.push(AsmInstruction::Mov(asmtype.clone(), src, Operand::Reg(Register::R10, regsize.clone())));
-                         new_instructions.push(AsmInstruction::Idiv(asmtype, Operand::Reg(Register::R10, regsize)));
-                     },
-                     _ => new_instructions.push(AsmInstruction::Idiv(asmtype, src)),
-                 }
-            },
-            AsmInstruction::Div(asmtype, src) => {
-                 let src = resolve_operand(src, &mut map, &mut offset, symbols);
-                 let regsize = get_regsize(&asmtype);
-                 match &src {
-                     Operand::Imm(_) => {
-                         new_instructions.push(AsmInstruction::Mov(asmtype.clone(), src, Operand::Reg(Register::R10, regsize.clone())));
-                         new_instructions.push(AsmInstruction::Div(asmtype, Operand::Reg(Register::R10, regsize)));
-                     },
-                     _ => new_instructions.push(AsmInstruction::Div(asmtype, src)),
-                 }
-            },
-            AsmInstruction::Cmp(asmtype, v1, v2) => {
-                let v1 = resolve_operand(v1, &mut map, &mut offset, symbols);
-                let v2 = resolve_operand(v2, &mut map, &mut offset, symbols);
-                let regsize = get_regsize(&asmtype);
-                let mut v1_scratch = false;
-                let mut v2_scratch = false;
-                if let Operand::Imm(v) = v1.clone() {
-                   if i32::try_from(v).is_err() {
-                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v1.clone(), Operand::Reg(Register::R10, regsize.clone())));
-                       v1_scratch = true
-                   }
-                }
-                if let Operand::Imm(_) = v2.clone() {
-                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v2.clone(), Operand::Reg(Register::R11, regsize.clone())));
-                       v2_scratch = true
-                }
-                match (&v1, &v2) {
-                   (Operand::Stack(_) | Operand::Data(_), Operand::Stack(_) | Operand::Data(_)) => {
-                       new_instructions.push(AsmInstruction::Mov(asmtype.clone(), v2.clone(), Operand::Reg(Register::R11, regsize.clone())));
-                       v2_scratch = true;
-                   },
-                   _ => {},
-                }
-                match (v1_scratch, v2_scratch) {
-                    (true, false) => new_instructions.push(AsmInstruction::Cmp(asmtype, Operand::Reg(Register::R10, regsize), v2)),
-                    (false, true) => new_instructions.push(AsmInstruction::Cmp(asmtype, v1, Operand::Reg(Register::R11, regsize))),
-                    (true, true) => new_instructions.push(AsmInstruction::Cmp(asmtype, Operand::Reg(Register::R10, RegSize::Quad), Operand::Reg(Register::R11, regsize))),
-                    (false, false) => new_instructions.push(AsmInstruction::Cmp(asmtype, v1, v2)),
-                }
-            },
-            AsmInstruction::SetCC(cond, dst) => {
-                let dst = resolve_operand(dst, &mut map, &mut offset, symbols);
-                new_instructions.push(AsmInstruction::SetCC(cond, dst));
-            },
-            AsmInstruction::Push(val) => {
-                let val = resolve_operand(val, &mut map, &mut offset, symbols);
-                new_instructions.push(AsmInstruction::Push(val));
-            },
-            AsmInstruction::MovZeroExtend(src, dst) => {
-                let src = resolve_operand(src, &mut map, &mut offset, symbols);
-                let dst = resolve_operand(dst, &mut map, &mut offset, symbols);
-                match dst {
-                    Operand::Reg(_, _) => new_instructions.push(AsmInstruction::Mov(AsmType::Longword, src, dst)),
-                    Operand::Data(_) | Operand::Stack(_) => {
-                        new_instructions.push(AsmInstruction::Mov(AsmType::Longword, src, Operand::Reg(Register::R11, RegSize::Long)));
-                        new_instructions.push(AsmInstruction::Mov(AsmType::Quadword, Operand::Reg(Register::R11, RegSize::Quad), dst));
-                    },
-                    _ => {},
-                }
-            },
-            other => new_instructions.push(other),
+            other => other,
         }
     }
-    let offset = (offset.abs() as u32).next_multiple_of(16) as i32;
-    new_instructions.insert(0, AsmInstruction::Binary(BinaryOp::Sub, 
-                                                      AsmType::Quadword, 
-                                                      Operand::Imm(offset as i64), 
-                                                      Operand::Reg(Register::SP, RegSize::Quad)));
-    AsmFunction { identifier: func.identifier, global: func.global, body: new_instructions }
-}
+    
+    fn assign_slots(&mut self) -> AsmFunction {
+        for instruction in self.old.body.clone() {
+            self.assign_instruction_slots(instruction);
+        }
+        let offset = (self.offset.abs() as u32).next_multiple_of(16) as i32;
+        self.new.insert(0, AsmInstruction::Binary(BinaryOp::Sub, 
+                                                          AsmType::Quadword, 
+                                                          Operand::Imm(offset as i64), 
+                                                          Operand::Reg(Register::SP, RegSize::Quad)));
+        AsmFunction { identifier: self.old.identifier.clone(), global: self.old.global, body: self.new.clone() }
+    }
 
-fn resolve_operand(op: Operand, map: &mut HashMap<String, i32>, offset: &mut i32, symbols: &AsmSymbolTable) -> Operand {
-    match op {
-        Operand::Pseudo(ident) => {
-            let Some(AsmSymbol::ObjEntry(asmtype, is_static)) = symbols.get(&ident) else { unreachable!() };
-            if *is_static {
-                return Operand::Data(ident); 
-            } else {
-                let size = get_size(&asmtype);
-                let stackoffset = map.entry(ident).or_insert_with(|| { 
-                    *offset -= size;
-                    *offset = *offset & !(get_alignment(&asmtype) - 1); 
-                    *offset
-                });
-                Operand::Stack(*stackoffset)
+    fn assign_instruction_slots(&mut self, instruction: AsmInstruction) {
+        // println!("PRE FIXUP -> {:?}", instruction);
+        match instruction {
+            AsmInstruction::Ret => self.push(AsmInstruction::Ret),
+
+            AsmInstruction::Mov(t, src, dst) => {
+                let (s, d) = (self.res_op(src), self.res_op(dst));
+                if !t.is_double() {
+                    if s.is_memory() && d.is_memory() {
+                        let temp = get_reg(&t, Scratch::Source);
+                        self.push(AsmInstruction::Mov(t, s.clone(), temp.clone()));
+                        self.push(AsmInstruction::Mov(t, temp.clone(), d.clone()));
+                    } else if s.is_large_32bit_imm() && matches!(t, AsmType::Quadword)  {
+                        let temp = get_reg(&AsmType::Longword, Scratch::Source);
+                        self.push(AsmInstruction::Mov(AsmType::Longword, s.clone(), temp.clone()));
+                        let temp = get_reg(&AsmType::Quadword, Scratch::Source);
+                        self.push(AsmInstruction::Mov(AsmType::Quadword, temp.clone(), d.clone()));
+                    } else if s.is_large_64bit_imm() {
+                        let temp = get_reg(&AsmType::Quadword, Scratch::Source);
+                        self.push(AsmInstruction::Mov(AsmType::Quadword, s.clone(), temp.clone()));
+                        self.push(AsmInstruction::Mov(AsmType::Quadword, temp.clone(), d.clone()));
+                    } else {
+                        self.push(AsmInstruction::Mov(t, s.clone(), d.clone()));
+                    }
+                } else {
+                    if s.is_memory() && d.is_memory() {
+                        let temp = get_reg(&t, Scratch::Dest);
+                        self.push(AsmInstruction::Mov(t, s.clone(), temp.clone()));
+                        self.push(AsmInstruction::Mov(t, temp.clone(), d.clone()));
+                    } else {
+                        self.push(AsmInstruction::Mov(t, s.clone(), d.clone()));
+                    }
+                }
+            },
+
+            AsmInstruction::Movsx(src, dst) => {
+                let (mut s, d) = (self.res_op(src), self.res_op(dst));
+                if s.is_imm() {
+                    let temp = get_reg(&AsmType::Longword, Scratch::Source);
+                    self.push(AsmInstruction::Mov(AsmType::Longword, s, temp.clone()));
+                    s = temp;
+                }
+                if !d.is_reg() {
+                    let temp = get_reg(&AsmType::Quadword, Scratch::Dest);
+                    self.push(AsmInstruction::Movsx(s, temp.clone()));
+                    self.push(AsmInstruction::Mov(AsmType::Quadword, temp, d));
+                } else {
+                    self.push(AsmInstruction::Movsx(s, d));
+                }
+            },
+
+            AsmInstruction::Unary(op, t, dst) => {
+                let d = self.res_op(dst);
+                self.push(AsmInstruction::Unary(op, t, d));
+            },
+
+            AsmInstruction::Binary(op, t, src, dst) => {
+                self.bin_handler(&op, &t, src, dst);
             }
-        },
-        other => other,
+
+            AsmInstruction::Idiv(t, src) => {
+                let s = self.res_op(src);
+                if s.is_imm() {
+                    let temp = get_reg(&t, Scratch::Source);
+                    self.push(AsmInstruction::Mov(t, s, temp.clone()));
+                    self.push(AsmInstruction::Idiv(t, temp));
+                 } else {
+                     self.push(AsmInstruction::Idiv(t, s));
+                 }
+            },
+
+            AsmInstruction::Div(t, src) => {
+                let s = self.res_op(src);
+                if s.is_imm() {
+                    let temp = get_reg(&t, Scratch::Source);
+                    self.push(AsmInstruction::Mov(t, s, temp.clone()));
+                    self.push(AsmInstruction::Div(t, temp));
+                 } else {
+                     self.push(AsmInstruction::Div(t, s));
+                 }
+            },
+
+            AsmInstruction::Cmp(mut t, v1, v2) => {
+                let (mut v1, mut v2) = (self.res_op(v1.clone()), self.res_op(v2.clone()));
+                if v1.is_large_64bit_imm() {
+                    let temp = get_reg(&AsmType::Quadword, Scratch::Source);
+                    self.push(AsmInstruction::Mov(AsmType::Quadword, v1, temp.clone()));
+                    v1 = temp;
+                    t = AsmType::Quadword;
+                } else if v1.is_large_32bit_imm() && matches!(t, AsmType::Quadword)  {
+                    let temp = get_reg(&AsmType::Longword, Scratch::Source);
+                    self.push(AsmInstruction::Mov(AsmType::Longword, v1, temp.clone()));
+                    v1 = get_reg(&AsmType::Quadword, Scratch::Source);
+                    t = AsmType::Quadword;
+                }
+                if v2.is_imm() {
+                    let temp = get_reg(&t, Scratch::Dest);
+                    self.push(AsmInstruction::Mov(t, v2, temp.clone()));
+                    v2 = temp;
+                }
+                if t.is_double() && !v2.is_reg() {
+                    let temp = get_reg(&t, Scratch::Dest);
+                    self.push(AsmInstruction::Mov(t, v2, temp.clone()));
+                    v2 = temp;
+                }
+                if v1.is_memory() && v2.is_memory() {
+                    let temp = get_reg(&t, Scratch::Source);
+                    self.push(AsmInstruction::Mov(t, v1, temp.clone()));
+                    v1 = temp;
+                }
+                self.push(AsmInstruction::Cmp(t, v1, v2));
+            },
+
+            AsmInstruction::SetCC(cond, dst) => {
+                let d = self.res_op(dst);
+                self.push(AsmInstruction::SetCC(cond, d));
+            },
+
+            AsmInstruction::Push(val) => {
+                let v = self.res_op(val);
+                self.push(AsmInstruction::Push(v));
+            },
+
+            AsmInstruction::MovZeroExtend(src, dst) => {
+                let (s, d) = (self.res_op(src), self.res_op(dst));
+                if d.is_reg() { self.push(AsmInstruction::Mov(AsmType::Longword, s, d)); }
+                else if d.is_memory() {
+                    let mut temp = get_reg(&AsmType::Longword, Scratch::Dest);
+                    self.push(AsmInstruction::Mov(AsmType::Longword, s, temp.clone()));
+                    temp = get_reg(&AsmType::Quadword, Scratch::Dest);
+                    self.push(AsmInstruction::Mov(AsmType::Quadword, temp, d));
+                }
+            },
+
+            AsmInstruction::Cvttsd2si(t, src, dst) => {
+                let (s, d) = (self.res_op(src), self.res_op(dst));
+                if !d.is_reg() {
+                    let temp = get_reg(&t, Scratch::Dest);
+                    self.push(AsmInstruction::Cvttsd2si(t, s, temp.clone()));
+                    self.push(AsmInstruction::Mov(t, temp, d));
+                } else {
+                    self.push(AsmInstruction::Cvttsd2si(t, s, d));
+                }
+            },
+
+            AsmInstruction::Cvtsi2sd(t, src, dst) => {
+                let (mut s, d) = (self.res_op(src), self.res_op(dst));
+                if s.is_imm() { 
+                    let temp = get_reg(&t, Scratch::Source); 
+                    self.push(AsmInstruction::Mov(t, s, temp.clone())); 
+                    s = temp; 
+                }
+                if !d.is_reg() { 
+                    let temp = get_reg(&AsmType::Double, Scratch::Dest); 
+                    self.push(AsmInstruction::Cvtsi2sd(t, s, temp.clone())); 
+                    self.push(AsmInstruction::Mov(AsmType::Double, temp, d)); 
+                } else {
+                    self.push(AsmInstruction::Cvtsi2sd(t, s, d)); 
+                }
+            },
+
+            other => self.push(other),
+        }
+    }
+
+    fn bin_handler(&mut self, op: &BinaryOp, mut t: &AsmType, src: Operand, dst: Operand) {
+        let (mut s, d) = (self.res_op(src), self.res_op(dst));
+        match op {
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+                if !t.is_double() {
+                    if s.is_large_64bit_imm() {
+                        let temp = get_reg(&AsmType::Quadword, Scratch::Source);
+                        self.push(AsmInstruction::Mov(AsmType::Quadword, s, temp.clone()));
+                        s = temp;
+                        t = &AsmType::Quadword;
+                    } else if s.is_large_32bit_imm() && matches!(t, AsmType::Quadword)  {
+                        let temp = get_reg(&AsmType::Longword, Scratch::Source);
+                        self.push(AsmInstruction::Mov(AsmType::Longword, s, temp.clone()));
+                        s = get_reg(&AsmType::Quadword, Scratch::Source);
+                        t = &AsmType::Quadword;
+                    }
+                    if s.is_memory() && d.is_memory() {
+                        let temp = get_reg(&t, Scratch::Source);
+                        self.push(AsmInstruction::Mov(*t, s, temp.clone()));
+                        s = temp;
+                    }
+                    self.push(AsmInstruction::Binary(*op, *t, s, d));
+                } else {
+                    if !d.is_reg() {
+                        let temp = get_reg(&t, Scratch::Dest);
+                        self.push(AsmInstruction::Mov(*t, d.clone(), temp.clone()));
+                        self.push(AsmInstruction::Binary(*op, *t, s, temp.clone()));
+                        self.push(AsmInstruction::Mov(*t, temp, d));
+                    } else {
+                        self.push(AsmInstruction::Binary(*op, *t, s, d));
+                    }
+                }
+            }, 
+
+            BinaryOp::DivDouble => {
+                if !d.is_reg() {
+                    let temp = get_reg(&t, Scratch::Dest);
+                    self.push(AsmInstruction::Mov(*t, d.clone(), temp.clone()));
+                    self.push(AsmInstruction::Binary(*op, *t, s, temp.clone()));
+                    self.push(AsmInstruction::Mov(*t, temp, d));
+                } else {
+                    self.push(AsmInstruction::Binary(*op, *t, s, d));
+                }
+            },
+            
+            BinaryOp::Mult => {
+                if !t.is_double() {
+                    if s.is_large_64bit_imm() {
+                        let temp = get_reg(&AsmType::Quadword, Scratch::Source);
+                        self.push(AsmInstruction::Mov(AsmType::Quadword, s, temp.clone()));
+                        s = temp;
+                        t = &AsmType::Quadword;
+                    } else if s.is_large_32bit_imm() && matches!(t, AsmType::Quadword)  {
+                        let temp = get_reg(&AsmType::Longword, Scratch::Source);
+                        self.push(AsmInstruction::Mov(AsmType::Longword, s, temp.clone()));
+                        s = get_reg(&AsmType::Quadword, Scratch::Source);
+                        t = &AsmType::Quadword;
+                    }
+                } 
+                if !d.is_reg() {
+                    let temp = get_reg(&t, Scratch::Dest);
+                    self.push(AsmInstruction::Mov(*t, d.clone(), temp.clone()));
+                    self.push(AsmInstruction::Binary(*op, *t, s, temp.clone()));
+                    self.push(AsmInstruction::Mov(*t, temp, d));
+                } else {
+                    self.push(AsmInstruction::Binary(*op, *t, s, d));
+                }
+            },
+
+            BinaryOp::Sal | BinaryOp::Sar | BinaryOp::Shl | BinaryOp::Shr  => {
+                self.push(AsmInstruction::Binary(*op, *t, s, d));
+            },
+        }
     }
 }

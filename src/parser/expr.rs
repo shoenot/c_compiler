@@ -1,4 +1,5 @@
 use super::*;
+use ordered_float::OrderedFloat;
 
 impl Parser {
     pub fn parse_expression(&mut self, min_prec: i32) -> Result<Expression, ParseError> {
@@ -54,7 +55,7 @@ impl Parser {
         }
     }
 
-    fn parse_unsigned_const(&self, number: String) -> Result<Const, ParseError> {
+    fn parse_u_const(&self, number: String) -> Result<Const, ParseError> {
         let v = number.parse::<u64>().map_err(|_| ParseError::IntegerOverflow(self.current_span))?;
         if v <= u32::MAX as u64 {
             Ok(Const::UInt(v as u32))
@@ -71,15 +72,27 @@ impl Parser {
             None => self.advance()?,
         };
         let expr = match current_token.token_type {
-            TokenType::Constant(value) => self.new_expr(ExpressionKind::Constant(self.parse_const(value)?)),
-            TokenType::LongConstant(value) => {
-                let v = value.parse::<i64>().map_err(|_| ParseError::IntegerOverflow(self.current_span))?;
-                self.new_expr(ExpressionKind::Constant(Const::Long(v)))
-            },
-            TokenType::UnsignedIntConstant(value) => self.new_expr(ExpressionKind::Constant(self.parse_unsigned_const(value)?)),
-            TokenType::UnsignedLongConstant(value) => {
-                let v = value.parse::<u64>().map_err(|_| ParseError::IntegerOverflow(self.current_span))?;
-                self.new_expr(ExpressionKind::Constant(Const::ULong(v)))
+            TokenType::NumericConstant(n) => {
+                match n.numtype {
+                    NumericType::Int => {
+                        self.new_expr(ExpressionKind::Constant(self.parse_const(n.number)?))
+                    },
+                    NumericType::Long => {
+                        let v = n.number.parse::<i64>().map_err(|_| ParseError::IntegerOverflow(self.current_span))?;
+                        self.new_expr(ExpressionKind::Constant(Const::Long(v)))
+                    },
+                    NumericType::UInt => {
+                        self.new_expr(ExpressionKind::Constant(self.parse_u_const(n.number)?))
+                    },
+                    NumericType::ULong => {
+                        let v = n.number.parse::<u64>().map_err(|_| ParseError::IntegerOverflow(self.current_span))?;
+                        self.new_expr(ExpressionKind::Constant(Const::ULong(v)))
+                    },
+                    NumericType::Double => {
+                        let v = n.number.parse::<f64>().map_err(|_| ParseError::InvalidFloat(self.current_span))?;
+                        self.new_expr(ExpressionKind::Constant(Const::Double(OrderedFloat(v))))
+                    },
+                }
             },
             TokenType::OpenParen => {
                 if self.next_token_is_type() {
