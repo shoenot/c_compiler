@@ -174,6 +174,8 @@ pub enum ExpressionKind {
     PrefixDecrement(Box<Expression>),
     PostfixDecrement(Box<Expression>),
     FunctionCall(String, Vec<Expression>),
+    Dereference(Box<Expression>),
+    AddrOf(Box<Expression>),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]

@@ -8,6 +8,7 @@ pub enum Type {
     UInt,
     ULong,
     Double,
+    Pointer(Box<Type>),
     FuncType{params: Vec<Box<Type>>, ret: Box<Type>},
 }
 
@@ -18,6 +19,7 @@ impl Type {
             Type::UInt => 32,
             Type::Long => 64,
             Type::ULong => 64,
+            Type::Pointer(_) => 64,
             Type::Double => unreachable!(),
             Type::FuncType { .. } => unreachable!(),
         }
@@ -29,6 +31,7 @@ impl Type {
             Type::UInt => false,
             Type::Long => true,
             Type::ULong => false,
+            Type::Pointer(_) => false,
             Type::Double => unreachable!(),
             Type::FuncType { .. } => unreachable!(),
         }

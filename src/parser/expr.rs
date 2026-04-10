@@ -114,6 +114,14 @@ impl Parser {
             TokenType::Exclamation => self.parse_unop(UnaryOp::Not)?,
             TokenType::Tilde => self.parse_unop(UnaryOp::Complement)?,
             TokenType::Minus => self.parse_unop(UnaryOp::Negate)?,
+            TokenType::Asterisk => {
+                let operand = self.parse_factor(None)?;
+                self.new_expr(ExpressionKind::Dereference(Box::new(operand)))
+            }
+            TokenType::Ampersand => {
+                let operand = self.parse_factor(None)?;
+                self.new_expr(ExpressionKind::AddrOf(Box::new(operand)))
+            }
             TokenType::Identifier(name) => {
                 if self.next_token_is(TokenType::OpenParen) {
                     let args = self.parse_func_args()?;
