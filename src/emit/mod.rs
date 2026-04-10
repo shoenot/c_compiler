@@ -229,6 +229,8 @@ fn emit_conditional_op(instruction: CondOp, condition: Condition) -> String {
         Condition::AE => "ae",
         Condition::B => "b",
         Condition::BE => "be",
+        Condition::P => "p",
+        Condition::NP => "np",
     };
     format!("{first}{second}")
 }

@@ -51,6 +51,7 @@ pub enum SemanticError {
     ComplementFloat(Span),
     RemainderFloat(Span),
     FloatUsedInCase(Span),
+    BitwiseWithDouble(Span),
 }
 
 impl fmt::Display for SemanticError {
@@ -83,6 +84,7 @@ impl fmt::Display for SemanticError {
             SemanticError::ComplementFloat(s) => write!(f, "Tried to take bitwise complement of float at {}", s),
             SemanticError::RemainderFloat(s) => write!(f, "Tried to take remainder of float at {}", s),
             SemanticError::FloatUsedInCase(s) => write!(f, "Float used in case statement at {}", s),
+            SemanticError::BitwiseWithDouble(s) => write!(f, "Float used bitwise operation at {}", s),
         }
     }
 }

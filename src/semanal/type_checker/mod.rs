@@ -233,6 +233,13 @@ impl<'a> TypeChecker<'a> {
                         convert_type(exp1, common_type.clone());
                         convert_type(exp2, common_type.clone());
                     }
+                    if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift |
+                                    BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr |
+                                    BinaryOp::BitwiseXor) {
+                        if matches!(common_type, Type::Double) {
+                            return Err(SemanticError::BitwiseWithDouble(expr.span))
+                        }
+                    }
                     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual |
                                     BinaryOp::GreaterThan | BinaryOp::LessThan |
                                     BinaryOp::GreaterOrEqual | BinaryOp::LessOrEqual) {

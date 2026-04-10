@@ -150,6 +150,8 @@ pub enum Condition {
     AE,
     B,
     BE,
+    P,
+    NP,
 }
 
 pub fn get_func_reg(argn: usize, is_float: bool) -> Register {

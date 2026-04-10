@@ -233,9 +233,12 @@ impl<'a> FuncGen<'a> {
                         self.push(AsmInstruction::JmpCC(Condition::E, id))
                     } else {
                         let scratch = Operand::Reg(Register::XMM0, RegSize::Quad);
+                        let parity_jmptgt = self.get_count();
                         self.push(AsmInstruction::Binary(BinaryOp::BitXor, cndt, scratch.clone(), scratch.clone()));
                         self.push(AsmInstruction::Cmp(AsmType::Double, scratch, cndv));
-                        self.push(AsmInstruction::JmpCC(Condition::E, id))
+                        self.push(AsmInstruction::JmpCC(Condition::P, parity_jmptgt.clone()));
+                        self.push(AsmInstruction::JmpCC(Condition::E, id));
+                        self.push(AsmInstruction::Label(parity_jmptgt));
                     }
                 }
                 poise::PoiseInstruction::JumpIfNotZero{condition: cnd, identifier: id} => {
@@ -243,12 +246,13 @@ impl<'a> FuncGen<'a> {
                     let cndv = self.gen_operand(cnd.clone());
                     if !self.is_double(&cnd) {
                         self.push(AsmInstruction::Cmp(cndt, Operand::Imm(0), cndv));
-                        self.push(AsmInstruction::JmpCC(Condition::NE, id))
+                        self.push(AsmInstruction::JmpCC(Condition::NE, id));
                     } else {
                         let scratch = Operand::Reg(Register::XMM0, RegSize::Quad);
                         self.push(AsmInstruction::Binary(BinaryOp::BitXor, cndt, scratch.clone(), scratch.clone()));
                         self.push(AsmInstruction::Cmp(AsmType::Double, scratch, cndv));
-                        self.push(AsmInstruction::JmpCC(Condition::NE, id))
+                        self.push(AsmInstruction::JmpCC(Condition::P, id.clone()));
+                        self.push(AsmInstruction::JmpCC(Condition::NE, id));
                     }
                 },
                 poise::PoiseInstruction::Copy{src, dst} => {
@@ -393,13 +397,15 @@ impl<'a> FuncGen<'a> {
                 if !self.is_double(&src.clone()) {
                     self.push(AsmInstruction::Cmp(srct, Operand::Imm(0), s.clone()));
                     self.push(AsmInstruction::Mov(dstt, Operand::Imm(0), d.clone()));
-                    self.push(AsmInstruction::SetCC(Condition::E, d))
+                    self.push(AsmInstruction::SetCC(Condition::E, d));
                 } else {
                     let scratch = Operand::Reg(Register::XMM14, RegSize::Quad);
                     self.push(AsmInstruction::Binary(BinaryOp::BitXor, AsmType::Double, scratch.clone(), scratch.clone()));
-                    self.push(AsmInstruction::Cmp(AsmType::Double, s, scratch.clone()));
+                    self.push(AsmInstruction::Cmp(AsmType::Double, scratch.clone(), s));
                     self.push(AsmInstruction::Mov(dstt, Operand::Imm(0), d.clone()));
-                    self.push(AsmInstruction::SetCC(Condition::E, d))
+                    self.push(AsmInstruction::SetCC(Condition::E, d.clone()));
+                    self.push(AsmInstruction::SetCC(Condition::NP, Operand::Reg(Register::R11, RegSize::Byte)));
+                    self.push(AsmInstruction::Binary(BinaryOp::BitAnd, AsmType::Byte, Operand::Reg(Register::R11, RegSize::Byte), d.clone()));
                 }
             },
         };
@@ -407,6 +413,7 @@ impl<'a> FuncGen<'a> {
 
     fn binary_handler(&mut self, op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseVal) {
         let srct = self.get_asmtype(&src1);
+        let dstt = self.get_asmtype(&dst);
         let srcd = self.is_double(&src1);
         let signed = if !srcd { self.get_num_type(&src1).is_signed() } else { false };
         let regsize = get_regsize(&srct);
@@ -449,11 +456,26 @@ impl<'a> FuncGen<'a> {
                         self.push(AsmInstruction::Binary(gen_binary(op, signed), srct, Operand::Reg(Register::CX, RegSize::Byte), d));
                     },
                 }
-            }
+            }, 
+            PoiseBinaryOp::Equal | PoiseBinaryOp::GreaterThan | PoiseBinaryOp::GreaterOrEqual |
+            PoiseBinaryOp::LessThan | PoiseBinaryOp::LessOrEqual if srcd => {
+                self.push(AsmInstruction::Cmp(srct, s2.clone(), s1));
+                self.push(AsmInstruction::Mov(dstt, Operand::Imm(0), d.clone()));
+                self.push(AsmInstruction::SetCC(gen_conditional(op, signed), d.clone()));
+                self.push(AsmInstruction::SetCC(Condition::NP, Operand::Reg(Register::R11, RegSize::Byte)));
+                self.push(AsmInstruction::Binary(BinaryOp::BitAnd, AsmType::Byte, Operand::Reg(Register::R11, RegSize::Byte), d.clone()));
+            },
+            PoiseBinaryOp::NotEqual if srcd => {
+                self.push(AsmInstruction::Cmp(srct, s2.clone(), s1));
+                self.push(AsmInstruction::Mov(dstt, Operand::Imm(0), d.clone()));
+                self.push(AsmInstruction::SetCC(gen_conditional(op, signed), d.clone()));
+                self.push(AsmInstruction::SetCC(Condition::P, Operand::Reg(Register::R11, RegSize::Byte)));
+                self.push(AsmInstruction::Binary(BinaryOp::BitOr, AsmType::Byte, Operand::Reg(Register::R11, RegSize::Byte), d.clone()));
+            },
             PoiseBinaryOp::Equal | PoiseBinaryOp::NotEqual | PoiseBinaryOp::GreaterThan |
             PoiseBinaryOp::GreaterOrEqual | PoiseBinaryOp::LessThan | PoiseBinaryOp::LessOrEqual => {
                 self.push(AsmInstruction::Cmp(srct, s2.clone(), s1));
-                self.push(AsmInstruction::Mov(AsmType::Longword, Operand::Imm(0), d.clone()));
+                self.push(AsmInstruction::Mov(dstt, Operand::Imm(0), d.clone()));
                 self.push(AsmInstruction::SetCC(gen_conditional(op, signed), d));
             },
             _ => unreachable!(),
