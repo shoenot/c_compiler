@@ -1,4 +1,5 @@
 use std::iter::Peekable;
+use std::os::unix::process;
 use std::vec::IntoIter;
 use std::fmt;
 use crate::types::*;
@@ -27,6 +28,7 @@ pub enum ParseError {
     IntegerOverflow(Span),
     InvalidFloat(Span),
     MissingType(Span),
+    InvalidDeclarator(Span),
 }
 
 impl fmt::Display for ParseError {
@@ -45,6 +47,7 @@ impl fmt::Display for ParseError {
             ParseError::InvalidStorageClasses(s) => write!(f, "Parse Error: invalid storage classes!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::IntegerOverflow(s) => write!(f, "Parse Error: integer overflow!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::MissingType(s) => write!(f, "Parse Error: no type specified!\nLine: {}, Col: {}", s.line_number, s.col),
+            ParseError::InvalidDeclarator(s) => write!(f, "Parse Error: invalid declarator!\nLine: {}, Col: {}", s.line_number, s.col),
         }
     }
 }
@@ -74,8 +77,7 @@ static TYPE_SPECIFIERS: &[TokenType] = &[TokenType::Int, TokenType::Long,
                                          TokenType::Double];
 
 static INT_SPECIFIERS: &[TokenType] = &[TokenType::Int, TokenType::Long,
-                                         TokenType::Unsigned, TokenType::Signed,
-                                         TokenType::Double];
+                                         TokenType::Unsigned, TokenType::Signed];
 
 fn flip_or_err(flag: &mut bool, span: Span) -> Result<(), ParseError> { 
     if *flag {
@@ -131,6 +133,24 @@ impl TypeFlags {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum Declarator {
+    Ident(String),
+    PointerDeclarator(Box<Declarator>),
+    FuncDeclarator(Vec<Parameter>, Box<Declarator>)
+}
+
+#[derive(Debug, Clone)]
+pub enum AbstractDeclarator {
+    AbstractPointer(Box<AbstractDeclarator>),
+    AbstractBase,
+}
+
+#[derive(Debug, Clone)]
+pub struct Parameter {
+    declarator: Declarator,
+    datatype: Type,
+}
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Parser {
@@ -190,6 +210,12 @@ impl Parser {
         })
     }
 
+    fn next_token_is_asterisk(&mut self) -> bool {
+        self.peek().map_or(false, |token| {
+            matches!(token.token_type, TokenType::Asterisk)
+        })
+    }
+
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         let token = self.advance()?;
         match token.token_type {
@@ -229,10 +255,14 @@ impl Parser {
 
     pub fn parse_declaration(&mut self) -> Result<Decl, ParseError> {
         let (dtype, storage) = self.parse_specifiers()?;
-        let identifier = self.expect_ident()?;
-        let decl = match self.next_token_type()? {
-            TokenType::OpenParen => Decl::FuncDecl(self.parse_func_declaration(identifier, dtype, storage)?),
-            _ => Decl::VarDecl(self.parse_var_declaration(identifier, dtype, storage)?),
+        let declarator = self.parse_declarator()?;
+        let (ident, datatype, params) = self.process_declarator(declarator.clone(), dtype.clone())?;
+        let decl = match declarator {
+            Declarator::FuncDeclarator(..) => {
+                let param_names = params.unwrap();
+                Decl::FuncDecl(self.parse_func_declaration(ident, datatype, param_names, storage)?)
+            }
+            _ => Decl::VarDecl(self.parse_var_declaration(ident, dtype, storage)?),
         };
         Ok(decl)
     }
@@ -249,7 +279,7 @@ impl Parser {
         let mut storage = None;
         let mut types = Vec::new();
         loop {
-            if let TokenType::Identifier(_) = self.next_token_type()? {
+            if !SPECIFIERS.contains(&self.next_token_type()?) {
                 break;
             } else {
                 let token = self.advance()?.token_type;
@@ -272,11 +302,120 @@ impl Parser {
         Ok((dtype, storage))
     }
 
+    fn parse_declarator(&mut self) -> Result<Declarator, ParseError> {
+        if self.next_token_is(TokenType::Asterisk) {
+            self.advance()?;
+            let inner = self.parse_declarator()?;
+            Ok(Declarator::PointerDeclarator(Box::new(inner)))
+        } else {
+            self.parse_direct_declarator()
+        }
+    }
 
-    fn parse_func_declaration(&mut self, identifier: String, return_type: Type, storage: Option<StorageClass>) 
+    fn parse_direct_declarator(&mut self) -> Result<Declarator, ParseError> {
+        let simple = self.parse_simple_declarator()?;
+        if self.next_token_is(TokenType::OpenParen) {
+            let params = self.parse_func_params()?;
+            Ok(Declarator::FuncDeclarator(params, Box::new(simple)))
+        } else {
+            Ok(simple)
+        }
+    }
+
+    fn parse_simple_declarator(&mut self) -> Result<Declarator, ParseError> {
+        if matches!(self.next_token_type()?, TokenType::Identifier(_)) {
+            let ident = self.expect_ident()?;
+            Ok(Declarator::Ident(ident))
+        } else if self.next_token_is(TokenType::OpenParen) {
+            self.advance()?;
+            let declarator = self.parse_declarator()?;
+            self.expect(TokenType::CloseParen)?;
+            Ok(declarator)
+        } else {
+            Err(ParseError::InvalidDeclarator(self.current_span))
+        }
+    }
+
+    fn process_abstract_declarator(&mut self, abs: AbstractDeclarator, base_type: Type) -> Result<Type, ParseError> {
+        match abs {
+            AbstractDeclarator::AbstractPointer(inner) => {
+                let derived_type = Type::Pointer(Box::new(base_type));
+                self.process_abstract_declarator(*inner, derived_type)
+            }, 
+            AbstractDeclarator::AbstractBase => Ok(base_type)
+        }
+    }
+
+    fn process_declarator(&mut self, declarator: Declarator, base_type: Type) -> Result<(String, Type, Option<Vec<String>>), ParseError> {
+        match declarator {
+            Declarator::Ident(ident) => Ok((ident, base_type, None)),
+            Declarator::PointerDeclarator(d) => {
+                let derived_type = Type::Pointer(Box::new(base_type));
+                self.process_declarator(*d, derived_type)
+            },
+            Declarator::FuncDeclarator(params, d) => {
+                match *d {
+                    Declarator::Ident(ident) => {
+                        let mut param_names = Vec::new();
+                        let mut param_types = Vec::new();
+                        for param in params {
+                            let (param_name, param_type, _) = self.process_declarator(param.declarator, param.datatype)?; 
+                            if matches!(param_type, Type::FuncType {..}) {
+                                return Err(ParseError::InvalidTypes(self.current_span))
+                            }
+                            param_names.push(param_name);
+                            param_types.push(Box::new(param_type));
+                        }
+                        let derived_type = Type::FuncType{params: param_types, ret: Box::new(base_type)};
+                        Ok((ident, derived_type, Some(param_names)))
+                    },
+                    _ => Err(ParseError::InvalidTypes(self.current_span))
+                }
+            }
+        }
+    }
+
+    fn collect_param_type(&mut self) -> Result<Type, ParseError> {
+        let mut types = Vec::new();
+        while TYPE_SPECIFIERS.contains(&self.next_token_type()?) {
+            let tk = self.advance()?;
+            types.push(tk.token_type);
+        }
+        self.parse_types(&types)
+    }
+
+    fn parse_func_params(&mut self) -> Result<Vec<Parameter>, ParseError> {
+        self.expect(TokenType::OpenParen)?;
+        let mut params_list = Vec::new();
+        if self.next_token_is(TokenType::Void) {
+            self.advance()?;
+            self.expect(TokenType::CloseParen)?;
+            return Ok(params_list)
+        }
+
+        while !self.next_token_is(TokenType::CloseParen) {
+            let param = self.parse_parameter()?;
+            params_list.push(param);
+
+            while self.next_token_is(TokenType::Comma) {
+                self.expect(TokenType::Comma)?;
+                let param = self.parse_parameter()?;
+                params_list.push(param);
+                }
+            }
+
+        self.expect(TokenType::CloseParen)?;
+        return Ok(params_list)
+    }
+
+    fn parse_parameter(&mut self) -> Result<Parameter, ParseError> {
+        let param_type = self.collect_param_type()?;
+        let param_decl = self.parse_declarator()?;
+        Ok(Parameter { declarator: param_decl, datatype: param_type })
+    }
+
+    fn parse_func_declaration(&mut self, identifier: String, func_type: Type, params: Vec<String>, storage: Option<StorageClass>) 
         -> Result<FuncDeclaration, ParseError> {
-        let (param_types, params) = self.parse_func_params()?;
-        let func_type = Type::FuncType { params: param_types, ret: Box::new(return_type) };
         let mut body = None;
         if self.next_token_is(TokenType::OpenBrace) {
             body = Some(self.parse_block()?);
@@ -284,57 +423,6 @@ impl Parser {
             self.expect(TokenType::Semicolon)?;
         }
         Ok(FuncDeclaration { identifier, func_type, params, body, storage, span: self.current_span }) 
-    }
-
-    fn collect_param_type(&mut self) -> Result<Type, ParseError> {
-        let mut types = Vec::new();
-        while !matches!(self.next_token_type()?, TokenType::Identifier(_)) {
-            let next = self.next_token_type()?;
-            match next {
-                tk if TYPE_SPECIFIERS.contains(&next) => {
-                    self.advance()?;
-                    types.push(tk);
-                },
-                _ => return Err(ParseError::InvalidTypes(self.current_span)),
-            }
-        }
-        self.parse_types(&types)
-    }
-
-    fn parse_func_params(&mut self) -> Result<(Vec<Box<Type>>, Vec<String>), ParseError> {
-        self.expect(TokenType::OpenParen)?;
-        let mut types_list = Vec::new();
-        let mut params_list = Vec::new();
-        if self.next_token_is(TokenType::Void) {
-            self.advance()?;
-            self.expect(TokenType::CloseParen)?;
-            return Ok((types_list, params_list))
-        }
-
-        while !self.next_token_is(TokenType::CloseParen) {
-            let ptype = self.collect_param_type()?;
-            if let TokenType::Identifier(param) = self.advance()?.token_type {
-                types_list.push(Box::new(ptype));
-                params_list.push(param);
-            } else {
-                return Err(ParseError::ExpectedParam(self.current_span));
-            }
-
-            while self.next_token_is(TokenType::Comma) {
-                self.expect(TokenType::Comma)?;
-                let ptype = self.collect_param_type()?;
-                if let TokenType::Identifier(param) = self.advance()?.token_type {
-                    types_list.push(Box::new(ptype));
-                    params_list.push(param);
-                } else {
-                    return Err(ParseError::ExpectedParam(self.current_span));
-                }
-            }
-        
-        }
-
-        self.expect(TokenType::CloseParen)?;
-        Ok((types_list, params_list))
     }
 
     fn parse_var_declaration(&mut self, identifier: String, var_type: Type, storage: Option<StorageClass>) 
