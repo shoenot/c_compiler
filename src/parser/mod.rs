@@ -141,12 +141,6 @@ pub enum Declarator {
 }
 
 #[derive(Debug, Clone)]
-pub enum AbstractDeclarator {
-    AbstractPointer(Box<AbstractDeclarator>),
-    AbstractBase,
-}
-
-#[derive(Debug, Clone)]
 pub struct Parameter {
     declarator: Declarator,
     datatype: Type,
@@ -210,12 +204,6 @@ impl Parser {
         })
     }
 
-    fn next_token_is_asterisk(&mut self) -> bool {
-        self.peek().map_or(false, |token| {
-            matches!(token.token_type, TokenType::Asterisk)
-        })
-    }
-
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         let token = self.advance()?;
         match token.token_type {
@@ -257,8 +245,8 @@ impl Parser {
         let (dtype, storage) = self.parse_specifiers()?;
         let declarator = self.parse_declarator()?;
         let (ident, datatype, params) = self.process_declarator(declarator.clone(), dtype.clone())?;
-        let decl = match declarator {
-            Declarator::FuncDeclarator(..) => {
+        let decl = match datatype {
+            Type::FuncType{..} => {
                 let param_names = params.unwrap();
                 Decl::FuncDecl(self.parse_func_declaration(ident, datatype, param_names, storage)?)
             }
@@ -333,16 +321,6 @@ impl Parser {
             Ok(declarator)
         } else {
             Err(ParseError::InvalidDeclarator(self.current_span))
-        }
-    }
-
-    fn process_abstract_declarator(&mut self, abs: AbstractDeclarator, base_type: Type) -> Result<Type, ParseError> {
-        match abs {
-            AbstractDeclarator::AbstractPointer(inner) => {
-                let derived_type = Type::Pointer(Box::new(base_type));
-                self.process_abstract_declarator(*inner, derived_type)
-            }, 
-            AbstractDeclarator::AbstractBase => Ok(base_type)
         }
     }
 

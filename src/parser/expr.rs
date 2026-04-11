@@ -1,6 +1,12 @@
 use super::*;
 use ordered_float::OrderedFloat;
 
+#[derive(Debug, Clone)]
+pub enum AbstractDeclarator {
+    AbstractPointer(Box<AbstractDeclarator>),
+    AbstractBase,
+}
+
 impl Parser {
     pub fn parse_expression(&mut self, min_prec: i32) -> Result<Expression, ParseError> {
         let left = self.parse_factor(None)?;
@@ -66,6 +72,38 @@ impl Parser {
         }
     }
 
+    fn process_abstract_declarator(&mut self, abs: AbstractDeclarator, base_type: Type) -> Result<Type, ParseError> {
+        match abs {
+            AbstractDeclarator::AbstractPointer(inner) => {
+                let derived_type = Type::Pointer(Box::new(base_type));
+                self.process_abstract_declarator(*inner, derived_type)
+            }, 
+            AbstractDeclarator::AbstractBase => Ok(base_type)
+        }
+    }
+
+    fn parse_abstract_declarator(&mut self) -> Result<AbstractDeclarator, ParseError> {
+        let token = self.next_token_type()?;
+        match token {
+            TokenType::Asterisk => {
+                self.advance()?;
+                if matches!(self.next_token_type()?, TokenType::OpenParen | TokenType::Asterisk) {
+                    let inner = self.parse_abstract_declarator()?;
+                    Ok(AbstractDeclarator::AbstractPointer(Box::new(inner)))
+                } else {
+                    Ok(AbstractDeclarator::AbstractBase)
+                }
+            },
+            TokenType::OpenParen => {
+                self.expect(TokenType::OpenParen)?;
+                let ret = self.parse_abstract_declarator()?;
+                self.expect(TokenType::CloseParen)?;
+                Ok(ret)
+            },
+            _ => Err(ParseError::InvalidDeclarator(self.current_span)),
+        }
+    }
+
     pub fn parse_factor(&mut self, token: Option<Token>) -> Result<Expression, ParseError> {
         let current_token = match token {
             Some(t) => t, 
@@ -97,13 +135,17 @@ impl Parser {
             TokenType::OpenParen => {
                 if self.next_token_is_type() {
                     let mut types = Vec::new();
-                    while !self.next_token_is(TokenType::CloseParen) {
+                    while TYPE_SPECIFIERS.contains(&self.next_token_type()?) {
                         types.push(self.advance()?.token_type);
                     }
                     let ctype = self.parse_types(&types)?;
+                    let processed_type = if matches!(self.next_token_type()?, TokenType::OpenParen | TokenType::Asterisk) {
+                        let abs = self.parse_abstract_declarator()?;
+                        self.process_abstract_declarator(abs, ctype)?
+                    } else { ctype };
                     self.expect(TokenType::CloseParen)?;
                     let factor = Box::new(self.parse_factor(None)?);
-                    let expression = self.new_expr(ExpressionKind::Cast(ctype, factor));
+                    let expression = self.new_expr(ExpressionKind::Cast(processed_type, factor));
                     expression
                 } else {
                     let expression = self.parse_expression(0)?;
