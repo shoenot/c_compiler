@@ -4,6 +4,9 @@ use ordered_float::OrderedFloat;
 use super::*;
 use visitor_trait::*;
 
+static ARITHMETIC_TYPES: &[Type] = &[Type::Int, Type::Long,
+                                         Type::UInt, Type::ULong,
+                                         Type::Double];
 impl Symbol {
     fn new_func(ident: String, ftype: Type, defined: bool, global: bool) -> Symbol {
         Symbol { ident, datatype: ftype, attrs: IdentAttrs::FuncAttr { defined, global } }
@@ -34,6 +37,10 @@ fn get_common_type(t1: Type, t2: Type) -> Type {
     else if t1.size() == t2.size() {
         if t1.is_signed() { t2 } else { t1 }
     } else if t1.size() > t2.size() { t1 } else { t2 }
+}
+
+fn is_pointer(dtype: Type) -> bool {
+    matches!(dtype, Type::Pointer(_))
 }
 
 fn convert_type(expr: &mut Expression, datatype: Type) {
@@ -83,10 +90,30 @@ pub fn convert_constant(constant: Const, into: Type) -> Const {
         Type::UInt => Const::UInt(value as u32),
         Type::ULong => Const::ULong(value as u64),
         Type::Double => Const::Double(OrderedFloat(value as f64)),
-        Type::FuncType { .. } => unreachable!()
+        Type::Pointer(_) => unreachable!(),
+        Type::FuncType { .. } => unreachable!(),
     }
 }
-                         
+
+pub fn is_lvalue(expr: &Expression) -> bool {
+    matches!(expr.kind, ExpressionKind::Var(_) | ExpressionKind::Dereference(_))
+}
+
+pub fn is_null_ptr_const(expr: &Expression) -> bool {
+    match expr.kind {
+        ExpressionKind::Constant(c) => {
+            match c {
+                Const::Int(0) => true,
+                Const::Long(0) => true,
+                Const::UInt(0) => true,
+                Const::ULong(0) => true,
+                _ => false,
+            }
+        },
+        _ => false,
+    }
+}
+
 pub fn is_static<T: HasStorage>(decl: &T) -> bool {
     decl.storage_class() == Some(StorageClass::Static)
 }
@@ -100,10 +127,12 @@ impl<'a> TypeChecker<'a> {
         let mut initial_value = match &decl.init {
             Some(expr) => {
                 if let ExpressionKind::Constant(i) = expr.kind {
-                    println!("old: {:?}", i);
                     let new = convert_constant(i, decl.var_type.clone());
-                    println!("new: {:?}", new);
-                    let static_init = get_static_init(new);
+                    let static_init = if is_pointer(decl.var_type.clone()) && is_null_ptr_const(&expr) {
+                        StaticInit::ULongInit(0)
+                    } else {
+                        get_static_init(new)
+                    };
                     InitialValue::Initial(static_init)
                 } else {
                     return Err(SemanticError::NonConstantInitializer(decl.identifier.clone(), decl.span));
@@ -148,6 +177,36 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
     
+    fn get_common_ptr_type(&mut self, e1: &mut Expression, e2: &mut Expression) -> Result<Type, SemanticError> {
+        let e1t = e1.expression_type.unwrap().clone();
+        let e2t = e2.expression_type.unwrap().clone();
+        if e1t == e2t {
+            Ok(e1t)
+        } else if is_null_ptr_const(e1) {
+            Ok(e2t)
+        } else if is_null_ptr_const(e2) {
+            Ok(e1t)
+        } else {
+            Err(SemanticError::IncompatibleTypes(e1.span))
+        }
+    }
+
+    pub fn convert_by_assignment(&mut self, expr: &mut Expression, target: Type) -> Result<Type, SemanticError> {
+        let exp_t = self.type_expression(expr)?;
+        if exp_t == target {
+            Ok(exp_t)
+        } else if ARITHMETIC_TYPES.contains(&exp_t) && ARITHMETIC_TYPES.contains(&target) {
+            convert_type(expr, target.clone());
+            Ok(target)
+        } else if is_null_ptr_const(expr) && matches!(target, Type::Pointer(_)) {
+            convert_type(expr, target.clone());
+            Ok(target)
+        } else {
+            Err(SemanticError::IncompatibleTypes(expr.span))
+        }
+    }
+                         
+
     // helper func that returns resolved type
     fn type_expression(&mut self, expr: &mut Expression) -> Result<Type, SemanticError> {
         match &mut expr.kind {
@@ -161,9 +220,9 @@ impl<'a> TypeChecker<'a> {
                         if parameters.len() != args.len() {
                             return Err(SemanticError::FuncCalledWithWrongNumArgs(identifier.clone(), expr.span))
                         }
-                        for (arg, datatype) in std::iter::zip(args, parameters) {
+                        for (mut arg, datatype) in std::iter::zip(args, parameters) {
                             self.type_expression(arg)?;
-                            convert_type(arg, *datatype);
+                            self.convert_by_assignment(&mut arg, *datatype)?;
                         }
                         Ok(set_type(expr, *ret_type))
 
@@ -190,9 +249,11 @@ impl<'a> TypeChecker<'a> {
                 if let ExpressionKind::FunctionCall(ident, _) = &**exp1.as_ref() {
                     return Err(SemanticError::FuncUsedAsVar(ident.clone(), expr.span));
                 } else {
+                    if !is_lvalue(exp1) {
+                        return Err(SemanticError::InvalidLValue(expr.span));
+                    }
                     let exp1_type = self.type_expression(exp1)?;
-                    self.type_expression(exp2)?;
-                    convert_type(exp2, exp1_type.clone());
+                    self.convert_by_assignment(exp2, exp1_type.clone())?;
                     Ok(set_type(expr, exp1_type))
                 }
             },
@@ -206,14 +267,20 @@ impl<'a> TypeChecker<'a> {
                 }
             },
             ExpressionKind::Cast(t, factor) => {
-                self.type_expression(factor)?;
-                let exp_type = t.clone();
-                Ok(set_type(expr, exp_type))
+                let old_type = self.type_expression(factor)?;
+                let new_type = t.clone();
+                if is_pointer(new_type.clone()) != is_pointer(old_type) {
+                   return Err(SemanticError::IncompatibleTypes(expr.span));
+                }
+                self.convert_by_assignment(factor, new_type.clone())?;
+                Ok(set_type(expr, new_type))
             },
             ExpressionKind::Unary(op, inner) => {
                 let inner_exp = self.type_expression(inner)?;
-                if inner.expression_type == Some(Type::Double) && matches!(op, UnaryOp::Complement) {
+                if inner_exp == Type::Double && matches!(op, UnaryOp::Complement) {
                     Err(SemanticError::ComplementFloat(expr.span))
+                } else if is_pointer(inner_exp.clone()) && matches!(op, UnaryOp::Complement | UnaryOp::Negate) {
+                    Err(SemanticError::InvalidPointerOp(expr.span))
                 } else {
                     if *op == UnaryOp::Not {
                         Ok(set_type(expr, Type::Int))
@@ -228,7 +295,11 @@ impl<'a> TypeChecker<'a> {
                 if matches!(op, BinaryOp::LogicalOr | BinaryOp::LogicalAnd ) {
                     Ok(set_type(expr, Type::Int))
                 } else {
-                    let common_type = get_common_type(exp1_type.clone(), exp2_type.clone());
+                    let common_type = if matches!(exp1_type, Type::Pointer(_)) || matches!(exp2_type, Type::Pointer(_)) {
+                        self.get_common_ptr_type(exp1.clone().as_mut(), exp2.clone().as_mut())? 
+                    } else {
+                        get_common_type(exp1_type.clone(), exp2_type.clone())
+                    };
                     if !matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift ) {
                         convert_type(exp1, common_type.clone());
                         convert_type(exp2, common_type.clone());
@@ -239,6 +310,10 @@ impl<'a> TypeChecker<'a> {
                         if matches!(common_type, Type::Double) {
                             return Err(SemanticError::BitwiseWithDouble(expr.span))
                         }
+                    }
+                    if is_pointer(common_type.clone()) && matches!(op, BinaryOp::Multiply |
+                                                          BinaryOp::Divide | BinaryOp::Remainder) {
+                        return Err(SemanticError::InvalidPointerOp(expr.span));
                     }
                     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual |
                                     BinaryOp::GreaterThan | BinaryOp::LessThan |
@@ -264,11 +339,32 @@ impl<'a> TypeChecker<'a> {
                 let exp1_type = self.type_expression(exp1)?;
                 let exp2_type = self.type_expression(exp2)?;
                 self.type_expression(cond)?;
-                let common_type = get_common_type(exp1_type, exp2_type);
+                let common_type = if matches!(exp1_type, Type::Pointer(_)) || matches!(exp2_type, Type::Pointer(_)) {
+                    self.get_common_ptr_type(exp1.clone().as_mut(), exp2.clone().as_mut())? 
+                } else {
+                    get_common_type(exp1_type.clone(), exp2_type.clone())
+                };
                 convert_type(exp1, common_type.clone());
                 convert_type(exp2, common_type.clone());
                 Ok(set_type(expr, common_type))
-            }
+            },
+            ExpressionKind::Dereference(inner) => {
+                let inner_type = self.type_expression(inner)?;
+                match inner_type {
+                    Type::Pointer(ref_t) => {
+                        Ok(set_type(expr, *ref_t))
+                    },
+                    _ => Err(SemanticError::NonPointerDeref(expr.span))
+                }
+            },
+            ExpressionKind::AddrOf(inner) => {
+                if is_lvalue(inner.as_ref()) {
+                    let inner_type = self.type_expression(inner)?;
+                    Ok(set_type(expr, Type::Pointer(Box::new(inner_type))))
+                } else {
+                    Err(SemanticError::InvalidLValue(expr.span))
+                }
+            },
         }
     }
 
@@ -377,7 +473,7 @@ impl<'a> Visitor for TypeChecker<'a> {
         match &mut statement.kind {
             StatementKind::Return(expr) => {
                 self.type_expression(expr)?;
-                convert_type(expr, self.current_function_type.clone().unwrap());
+                self.convert_by_assignment(expr, self.current_function_type.clone().unwrap());
             },
             _ => walk_statement(self, statement)?,
         }

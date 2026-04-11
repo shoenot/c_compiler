@@ -141,6 +141,8 @@ pub fn walk_expression<V: Visitor + ?Sized>(v: &mut V, expression: &mut Expressi
         ExpressionKind::Var(_) |
         ExpressionKind::Constant(_) => {},
         ExpressionKind::Cast(_, exp) => v.visit_expression(exp.as_mut())?,
+        ExpressionKind::Dereference(exp) => v.visit_expression(exp)?,
+        ExpressionKind::AddrOf(exp) => v.visit_expression(exp)?,
     }
     Ok(())
 }

@@ -1,7 +1,7 @@
 mod driver;
 mod lexer;
 mod parser;
-// mod semanal;
+mod semanal;
 // mod poise;
 // mod codegen;
 // mod emit;

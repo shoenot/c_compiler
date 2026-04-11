@@ -164,22 +164,12 @@ impl Visitor for IdentResolver {
             },
             ExpressionKind::Cast(_, x) => self.visit_expression(x.as_mut())?,
             ExpressionKind::Assignment(lhs, rhs) => {
-                match lhs.kind {
-                    ExpressionKind::Var(_) => {},
-                    _ => {
-                        eprintln!("Invalid L-value: {:?}", lhs);
-                        return Err(SemanticError::InvalidLValue(expression.span));
-                    }
-                }
                 self.visit_expression(lhs.as_mut())?;
                 self.visit_expression(rhs.as_mut())?;
             },
             ExpressionKind::PostfixIncrement(exp) | ExpressionKind::PrefixIncrement(exp) | 
             ExpressionKind::PostfixDecrement(exp) | ExpressionKind::PrefixDecrement(exp) => {
-                match exp.kind {
-                    ExpressionKind::Var(_) => self.visit_expression(exp.as_mut())?,
-                    _ => return Err(SemanticError::InvalidLValue(expression.span)),
-                }
+                self.visit_expression(exp.as_mut())?;
             },
             ExpressionKind::FunctionCall(name, args) => {
                 if let Some(entry) = self.ident_map.get(name) {
