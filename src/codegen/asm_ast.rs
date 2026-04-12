@@ -54,6 +54,7 @@ pub enum AsmInstruction {
     Mov(AsmType, Operand, Operand),
     Movsx(Operand, Operand),
     MovZeroExtend(Operand, Operand),
+    Lea(Operand, Operand),
     Unary(UnaryOp, AsmType, Operand),
     Binary(BinaryOp, AsmType, Operand, Operand),
     Cmp(AsmType, Operand, Operand),
@@ -97,7 +98,7 @@ pub enum Operand {
     Imm(i64),
     Reg(Register, RegSize),
     Pseudo(String),
-    Stack(i32),
+    Memory(Register, i32),
     Data(String),
 }
 
@@ -113,6 +114,7 @@ pub enum Register {
     R10,
     R11,
     SP,
+    BP,
     XMM0,
     XMM1,
     XMM2,
@@ -251,7 +253,7 @@ impl AsmType {
 
 impl Operand {
     pub fn is_memory(&self) -> bool {
-        matches!(self, Operand::Stack(_) | Operand::Data(_))
+        matches!(self, Operand::Memory(..) | Operand::Data(_))
     }
 
     pub fn is_reg(&self) -> bool {
@@ -272,5 +274,13 @@ impl Operand {
         if let Operand::Imm(v) = self {
             u32::try_from(*v).is_err()
         } else { false }
+    }
+
+    pub fn is_xmm(&self) -> bool {
+        if let Operand::Reg(r, _) = self {
+            matches!(r, Register::XMM0 | Register::XMM1 | Register::XMM2 | Register::XMM3 | Register::XMM4 | Register::XMM5 | Register::XMM6 | Register::XMM7 | Register::XMM8 | Register::XMM9 | Register::XMM10 | Register::XMM11 | Register::XMM12 | Register::XMM13 | Register::XMM14 | Register::XMM15 )
+        } else {
+            false
+        }
     }
 }

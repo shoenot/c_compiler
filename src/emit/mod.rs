@@ -208,6 +208,11 @@ fn emit_instruction(instruction: AsmInstruction, output: &mut String, symbols: &
             let dst = emit_operand(dst)?;
             output.push_str(&format!("\tcvttsd2si{}\t{src},\t{dst}\n", t.suffix()));
         },
+        AsmInstruction::Lea(src, dst) => {
+            let src = emit_operand(src)?;
+            let dst = emit_operand(dst)?;
+            output.push_str(&format!("\tleaq\t{src},\t{dst}\n"))
+        },
         _ => unreachable!(),
     }
     Ok(())
@@ -241,16 +246,17 @@ fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
         Operand::Reg(reg, regsize) => {
             let n = regsize as usize;
             let rstr = match reg {
-                Register::AX   => ["al", "eax", "rax"][n],
-                Register::CX   => ["cl", "ecx", "rcx"][n],
-                Register::DX   => ["dl", "edx", "rdx"][n],
-                Register::DI   => ["dil", "edi", "rdi"][n],
-                Register::SI   => ["sil", "esi", "rsi"][n],
-                Register::R8   => ["r8b", "r8d", "r8"][n],
-                Register::R9   => ["r9b", "r9d", "r9"][n],
-                Register::R10  => ["r10b", "r10d", "r10"][n],
-                Register::R11  => ["r11b", "r11d", "r11"][n],
-                Register::SP   => "rsp",
+                Register::AX    => ["al", "eax", "rax"][n],
+                Register::CX    => ["cl", "ecx", "rcx"][n],
+                Register::DX    => ["dl", "edx", "rdx"][n],
+                Register::DI    => ["dil", "edi", "rdi"][n],
+                Register::SI    => ["sil", "esi", "rsi"][n],
+                Register::R8    => ["r8b", "r8d", "r8"][n],
+                Register::R9    => ["r9b", "r9d", "r9"][n],
+                Register::R10   => ["r10b", "r10d", "r10"][n],
+                Register::R11   => ["r11b", "r11d", "r11"][n],
+                Register::SP    => "rsp",
+                Register::BP    => "rbp",
                 Register::XMM0  => "xmm0",
                 Register::XMM1  => "xmm1",
                 Register::XMM2  => "xmm2",
@@ -270,7 +276,14 @@ fn emit_operand(operand: Operand) -> Result<String, EmissionError> {
             };
             Ok(format!("%{rstr}"))
         },
-        Operand::Stack(int) => Ok(format!("{int}(%rbp)")),
+        Operand::Memory(r, int) => {
+            let reg = emit_operand(Operand::Reg(r, RegSize::Quad))?;
+            if int == 0 { 
+                Ok(format!("({reg})"))
+            } else {
+                Ok(format!("{int}({reg})"))
+            }
+        },
         Operand::Data(ident) => Ok(format!("{ident}(%rip)")),
         Operand::Pseudo(ident) => Err(EmissionError::UnresolvedPseudoRegister(ident)),
     }

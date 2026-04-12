@@ -18,6 +18,7 @@ pub fn convert_type(dtype: &Type) -> AsmType {
         Type::UInt => AsmType::Longword,
         Type::ULong => AsmType::Quadword,
         Type::Double => AsmType::Double,
+        Type::Pointer(..) => AsmType::Quadword,
         _ => unreachable!(),
     }
 }

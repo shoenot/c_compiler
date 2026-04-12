@@ -5,8 +5,12 @@ use super::*;
 use visitor_trait::*;
 
 static ARITHMETIC_TYPES: &[Type] = &[Type::Int, Type::Long,
-                                         Type::UInt, Type::ULong,
-                                         Type::Double];
+                                     Type::UInt, Type::ULong,
+                                     Type::Double];
+
+static INTEGER_TYPES: &[Type] = &[Type::Int, Type::Long,
+                                  Type::UInt, Type::ULong];
+
 impl Symbol {
     fn new_func(ident: String, ftype: Type, defined: bool, global: bool) -> Symbol {
         Symbol { ident, datatype: ftype, attrs: IdentAttrs::FuncAttr { defined, global } }
@@ -90,7 +94,7 @@ pub fn convert_constant(constant: Const, into: Type) -> Const {
         Type::UInt => Const::UInt(value as u32),
         Type::ULong => Const::ULong(value as u64),
         Type::Double => Const::Double(OrderedFloat(value as f64)),
-        Type::Pointer(_) => unreachable!(),
+        Type::Pointer(_) => Const::ULong(0),
         Type::FuncType { .. } => unreachable!(),
     }
 }
@@ -130,6 +134,8 @@ impl<'a> TypeChecker<'a> {
                     let new = convert_constant(i, decl.var_type.clone());
                     let static_init = if is_pointer(decl.var_type.clone()) && is_null_ptr_const(&expr) {
                         StaticInit::ULongInit(0)
+                    } else if is_pointer(decl.var_type.clone()) {
+                        return Err(SemanticError::IncompatibleTypes(decl.span));
                     } else {
                         get_static_init(new)
                     };
@@ -252,7 +258,10 @@ impl<'a> TypeChecker<'a> {
                         return Err(SemanticError::InvalidLValue(expr.span));
                     }
                     let exp1_type = self.type_expression(exp1)?;
-                    self.convert_by_assignment(exp2, exp1_type.clone())?;
+                    let exp2_type = self.convert_by_assignment(exp2, exp1_type.clone())?;
+                    if is_pointer(exp1_type.clone()) || is_pointer(exp2_type.clone()) {
+
+                    }
                     Ok(set_type(expr, exp1_type))
                 }
             },
@@ -268,8 +277,13 @@ impl<'a> TypeChecker<'a> {
             ExpressionKind::Cast(t, factor) => {
                 let old_type = self.type_expression(factor)?;
                 let new_type = t.clone();
-                if is_pointer(new_type.clone()) != is_pointer(old_type) {
-                   return Err(SemanticError::IncompatibleTypes(expr.span));
+                if is_pointer(new_type.clone()) || is_pointer(old_type.clone()) {
+                    if !is_pointer(old_type.clone()) && !INTEGER_TYPES.contains(&old_type) {
+                        return Err(SemanticError::IncompatibleTypes(expr.span))
+                    }
+                    if !is_pointer(new_type.clone()) && !INTEGER_TYPES.contains(&new_type) {
+                        return Err(SemanticError::IncompatibleTypes(expr.span))
+                    }
                 }
                 Ok(set_type(expr, new_type))
             },
@@ -461,7 +475,9 @@ impl<'a> Visitor for TypeChecker<'a> {
                 Symbol::new_static_var(decl.identifier.clone(), decl.var_type.clone(), initial_value, false));
         } else {
             self.symbols.insert(decl.identifier.clone(), Symbol::new_var(decl.identifier.clone(), decl.var_type.clone()));
-            walk_var_decl(self, decl)?;
+            if let Some(expr) = &mut decl.init {
+                self.convert_by_assignment(expr, decl.var_type.clone())?;
+            }
         }
         Ok(())
     }

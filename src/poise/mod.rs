@@ -48,6 +48,9 @@ pub enum PoiseInstruction {
     Unary{op: PoiseUnaryOp, src: PoiseVal, dst: PoiseVal},
     Binary{op: PoiseBinaryOp, src1: PoiseVal, src2: PoiseVal, dst: PoiseVal},
     Copy{src: PoiseVal, dst:PoiseVal},
+    GetAddress{src: PoiseVal, dst:PoiseVal},
+    Load{src_ptr: PoiseVal, dst:PoiseVal},
+    Store{src: PoiseVal, dst_ptr:PoiseVal},
     Jump(String),
     JumpIfZero{condition: PoiseVal, identifier: String},
     JumpIfNotZero{condition: PoiseVal, identifier: String},
@@ -86,6 +89,12 @@ pub enum PoiseBinaryOp {
     GreaterThan,
     LessOrEqual,
     GreaterOrEqual,
+}
+
+#[derive(Debug, Clone)]
+pub enum ExpRes {
+    Plain(PoiseVal),
+    Deref(PoiseVal),
 }
 
 struct TmpCount {
@@ -170,7 +179,7 @@ fn gen_inst_var_declaration(
         }
     }
     if let Some(exp) = declaration.init.as_ref() {
-        let val = emit_expression(exp, instructions, symbols, count);
+        let val = emit_converted_expr(exp, instructions, symbols, count);
         let s = get_type(exp);
         let d = symbols.get(&declaration.identifier).unwrap().datatype.clone();
         let tmp = count.new_var(d.clone(), symbols);
@@ -198,16 +207,16 @@ fn gen_inst_statement(
     count: &mut TmpCount) {
     match &statement.kind {
         parser::StatementKind::Return(expression) => {
-            let val = emit_expression(expression, instructions, symbols, count);
+            let val = emit_converted_expr(expression, instructions, symbols, count);
             instructions.push(PoiseInstruction::Return(val));
         }
         parser::StatementKind::Expression(expression) => {
-            emit_expression(expression, instructions, symbols, count);
+            emit_converted_expr(expression, instructions, symbols, count);
         }
         parser::StatementKind::Null => return,
         parser::StatementKind::If(c, y, n) => {
             let cond = count.new_var(get_type(c), symbols);
-            let eval = emit_expression(c, instructions, symbols, count);
+            let eval = emit_converted_expr(c, instructions, symbols, count);
             let no_label = count.new_label_string();
             instructions.push(PoiseInstruction::Copy { src: eval, dst: cond.clone() });
             instructions.push(PoiseInstruction::JumpIfZero { condition: cond, identifier: no_label.clone() });
@@ -234,14 +243,14 @@ fn gen_inst_statement(
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "start")));
             gen_inst_statement(body, instructions, symbols, count);
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
-            let res = emit_expression(cond, instructions, symbols, count);
+            let res = emit_converted_expr(cond, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfNotZero { condition: res, identifier: loop_label_string(lab.clone(), "start") });
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
             
         },
         parser::StatementKind::While { cond, body, lab }  => {
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
-            let res = emit_expression(cond, instructions, symbols, count);
+            let res = emit_converted_expr(cond, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfZero { condition: res, identifier: loop_label_string(lab.clone(), "break") });
             gen_inst_statement(body, instructions, symbols, count);
             instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "cont")));
@@ -250,28 +259,28 @@ fn gen_inst_statement(
         },
         parser::StatementKind::For { init, cond, post, body, lab } => {
             if let parser::ForInit::InitExp(Some(exp)) = init {
-                emit_expression(exp, instructions, symbols, count);
+                emit_converted_expr(exp, instructions, symbols, count);
             } else if let parser::ForInit::InitDec(dec) = init {
                 gen_inst_var_declaration(dec, instructions, symbols, count);
             }
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "start")));
             if let Some(cond) = cond {
-                let res = emit_expression(cond, instructions, symbols, count);
+                let res = emit_converted_expr(cond, instructions, symbols, count);
                 instructions.push(PoiseInstruction::JumpIfZero { condition: res, identifier: loop_label_string(lab.clone(), "break") });
             }
             gen_inst_statement(body, instructions, symbols, count);
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "cont")));
             if let Some(post) = post {
-                emit_expression(post, instructions, symbols, count);
+                emit_converted_expr(post, instructions, symbols, count);
             }
             instructions.push(PoiseInstruction::Jump(loop_label_string(lab.clone(), "start")));
             instructions.push(PoiseInstruction::Label(loop_label_string(lab.clone(), "break")));
         },
         parser::StatementKind::Switch { scrutinee, body, lab, cases } => {
-            let scr = emit_expression(scrutinee, instructions, symbols, count);
+            let scr = emit_converted_expr(scrutinee, instructions, symbols, count);
             for case in cases.clone() {
                 if let (Some(value), clab) = case {
-                    let caseval = emit_expression(&value, instructions, symbols, count);
+                    let caseval = emit_converted_expr(&value, instructions, symbols, count);
                     let cmp = count.new_var(get_type(&value), symbols);
                     instructions.push(PoiseInstruction::Binary { op: PoiseBinaryOp::Equal, src1: caseval, src2: scr.clone(), dst: cmp.clone() });
                     instructions.push(PoiseInstruction::JumpIfNotZero { condition: cmp, identifier: loop_label_string(clab.clone(), "case") });
@@ -296,25 +305,33 @@ fn gen_inst_statement(
 }
 
 // Constructs IR instructions and returns the destination
-fn emit_expression(
+fn emit_expr_result(
     expr: &parser::Expression,
     instructions: &mut Vec<PoiseInstruction>,
     symbols: &mut SymbolTable,
-    count: &mut TmpCount) -> PoiseVal {
+    count: &mut TmpCount) -> ExpRes {
     match &expr.kind {
-        parser::ExpressionKind::Constant(val) => PoiseVal::Constant(*val),
-        parser::ExpressionKind::Unary(op, inner) => emit_un_exp(op, inner, instructions, symbols, count, get_type(expr)),
-        parser::ExpressionKind::Binary(op, exp1, exp2) => emit_bin_exp(op, exp1, exp2, instructions, symbols, count, get_type(expr)),
-        parser::ExpressionKind::Var(name) => PoiseVal::Variable(name.clone()),
+        parser::ExpressionKind::Constant(val) => ExpRes::Plain(PoiseVal::Constant(*val)),
+        parser::ExpressionKind::Unary(op, inner) => ExpRes::Plain(emit_un_exp(op, inner, instructions, symbols, count, get_type(expr))),
+        parser::ExpressionKind::Binary(op, exp1, exp2) => ExpRes::Plain(emit_bin_exp(op, exp1, exp2, instructions, symbols, count, get_type(expr))),
+        parser::ExpressionKind::Var(name) => ExpRes::Plain(PoiseVal::Variable(name.clone())),
         parser::ExpressionKind::Assignment(lhs, rhs) => {
-            let result = emit_expression(rhs, instructions, symbols, count);
-            let dest = emit_expression(lhs, instructions, symbols, count);
-            instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
-            dest
+            let lval = emit_expr_result(lhs, instructions, symbols, count);
+            let rval = emit_converted_expr(rhs, instructions, symbols, count);
+            match lval {
+                ExpRes::Plain(ref obj) => {
+                    instructions.push(PoiseInstruction::Copy { src: rval.clone(), dst: obj.clone()});
+                    lval
+                }, 
+                ExpRes::Deref(ptr) => {
+                    instructions.push(PoiseInstruction::Store { src: rval.clone(), dst_ptr: ptr.clone()});
+                    ExpRes::Plain(rval)
+                },
+            }
         },
         parser::ExpressionKind::Conditional(c, y, n) => {
             let cond = count.new_var(get_type(c), symbols);
-            let eval = emit_expression(c, instructions, symbols, count);
+            let eval = emit_converted_expr(c, instructions, symbols, count);
             let no_label = count.new_label_string();
             let yes_label = count.new_label_string();
             let dest = count.new_var(get_type(expr), symbols);
@@ -322,38 +339,38 @@ fn emit_expression(
             instructions.push(PoiseInstruction::Copy { src: eval, dst: cond.clone() });
 
             instructions.push(PoiseInstruction::JumpIfZero { condition: cond, identifier: no_label.clone() });
-            let result = emit_expression(y, instructions, symbols, count);
+            let result = emit_converted_expr(y, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
             instructions.push(PoiseInstruction::Jump(yes_label.clone()));
             instructions.push(PoiseInstruction::Label(no_label));
 
-            let result = emit_expression(n, instructions, symbols, count);
+            let result = emit_converted_expr(n, instructions, symbols, count);
             instructions.push(PoiseInstruction::Copy { src: result, dst: dest.clone()});
             instructions.push(PoiseInstruction::Label(yes_label));
-            dest
+            ExpRes::Plain(dest)
         },
         parser::ExpressionKind::PrefixIncrement(e) => {
-            let var = emit_expression(e, instructions, symbols, count);
+            let var = emit_converted_expr(e, instructions, symbols, count);
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Add,
                 src1: var.clone(),
                 src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
-            var
+            ExpRes::Plain(var)
         },
         parser::ExpressionKind::PrefixDecrement(e) => {
-            let var = emit_expression(e, instructions, symbols, count);
+            let var = emit_converted_expr(e, instructions, symbols, count);
             instructions.push(PoiseInstruction::Binary{
                 op: PoiseBinaryOp::Subtract,
                 src1: var.clone(),
                 src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
-            var
+            ExpRes::Plain(var)
         },
         parser::ExpressionKind::PostfixIncrement(e) => {
-            let var = emit_expression(e, instructions, symbols, count);
+            let var = emit_converted_expr(e, instructions, symbols, count);
             let tmp = count.new_var(get_type(e), symbols);
             instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
             instructions.push(PoiseInstruction::Binary{
@@ -362,10 +379,10 @@ fn emit_expression(
                 src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
-            tmp
+            ExpRes::Plain(tmp)
         },
         parser::ExpressionKind::PostfixDecrement(e) => {
-            let var = emit_expression(e, instructions, symbols, count);
+            let var = emit_converted_expr(e, instructions, symbols, count);
             let tmp = count.new_var(get_type(e), symbols);
             instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
             instructions.push(PoiseInstruction::Binary{
@@ -374,40 +391,73 @@ fn emit_expression(
                 src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
                 dst: var.clone(),
             });
-            tmp
+            ExpRes::Plain(tmp)
         },
         parser::ExpressionKind::FunctionCall(ident, args) => {
             let mut poiseargs = Vec::new();
             let dst = count.new_var(get_type(expr), symbols);
             for arg in args {
-                let exp = emit_expression(arg, instructions, symbols, count);
+                let exp = emit_converted_expr(arg, instructions, symbols, count);
                 let tmp = count.new_var(get_type(arg), symbols);
                 instructions.push(PoiseInstruction::Copy { src: exp, dst: tmp.clone() });
                 poiseargs.push(tmp);
             }
             instructions.push(PoiseInstruction::FunctionCall { ident: ident.clone(), args: poiseargs, dst: dst.clone() });
-            dst
+            ExpRes::Plain(dst)
         },
         parser::ExpressionKind::Cast(t, e) => {
-            let var = emit_expression(e, instructions, symbols, count);
+            let var = emit_converted_expr(e, instructions, symbols, count);
             if *t == get_type(e) {
-                var
+                ExpRes::Plain(var)
             } else if *t == Type::Double {
                 let dst = count.new_var(t.clone(), symbols);
-                if get_type(e).is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: var, dst: dst.clone() }); dst }
-                else { instructions.push(PoiseInstruction::UIntToDouble { src: var, dst: dst.clone() }); dst }
+                if get_type(e).is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
+                else { instructions.push(PoiseInstruction::UIntToDouble { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
             } else if get_type(e) == Type::Double {
                 let dst = count.new_var(t.clone(), symbols);
-                if t.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: var, dst: dst.clone() }); dst }
-                else { instructions.push(PoiseInstruction::DoubleToUInt { src: var, dst: dst.clone() }); dst }
+                if t.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
+                else { instructions.push(PoiseInstruction::DoubleToUInt { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
             } else {
                 let dst = count.new_var(t.clone(), symbols);
-                if t.size() == get_type(e).size() { instructions.push(PoiseInstruction::Copy { src: var, dst: dst.clone() }); return dst }
-                else if t.size() < get_type(e).size() { instructions.push(PoiseInstruction::Truncate { src: var, dst: dst.clone() }); return dst }
-                else if get_type(e).is_signed() { instructions.push(PoiseInstruction::SignExtend { src: var, dst: dst.clone() }); return dst }
-                else { instructions.push(PoiseInstruction::ZeroExtend { src: var, dst: dst.clone() }); return dst  }
+                if t.size() == get_type(e).size() { instructions.push(PoiseInstruction::Copy { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
+                else if t.size() < get_type(e).size() { instructions.push(PoiseInstruction::Truncate { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
+                else if get_type(e).is_signed() { instructions.push(PoiseInstruction::SignExtend { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
+                else { instructions.push(PoiseInstruction::ZeroExtend { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
             }
         },
+        parser::ExpressionKind::Dereference(p) => {
+            let res = emit_converted_expr(p, instructions, symbols, count);
+            ExpRes::Deref(res)
+        },
+        parser::ExpressionKind::AddrOf(e) => {
+            let val = emit_expr_result(e, instructions, symbols, count);
+            match val {
+                ExpRes::Plain(obj) => {
+                    let dst = count.new_var(get_type(expr), symbols);
+                    instructions.push(PoiseInstruction::GetAddress { src: obj, dst: dst.clone() });
+                    ExpRes::Plain(dst)
+                },
+                ExpRes::Deref(ptr) => {
+                    ExpRes::Plain(ptr)
+                },
+            }
+        },
+    }
+}
+
+fn emit_converted_expr(
+    expr: &parser::Expression,
+    instructions: &mut Vec<PoiseInstruction>,
+    symbols: &mut SymbolTable,
+    count: &mut TmpCount) -> PoiseVal {
+    let res = emit_expr_result(expr, instructions, symbols, count);
+    match res {
+        ExpRes::Plain(val) => val,
+        ExpRes::Deref(ptr) => {
+            let dst = count.new_var(get_type(expr), symbols);
+            instructions.push(PoiseInstruction::Load { src_ptr: ptr, dst: dst.clone() });
+            dst
+        }
     }
 }
 
@@ -440,8 +490,8 @@ fn emit_bin_exp(op: &parser::BinaryOp,
             parser::BinaryOp::GreaterOrEqual => PoiseBinaryOp::GreaterOrEqual,
             _ => unreachable!()
         };
-        let v1 = emit_expression(exp1, instructions, symbols, count);
-        let v2 = emit_expression(exp2, instructions, symbols, count);
+        let v1 = emit_converted_expr(exp1, instructions, symbols, count);
+        let v2 = emit_converted_expr(exp2, instructions, symbols, count);
         let dst = count.new_var(dest_type, symbols);
         instructions.push(PoiseInstruction::Binary {op: binop, src1: v1, src2: v2, dst: dst.clone() });
         dst
@@ -453,7 +503,7 @@ fn emit_un_exp(op: &parser::UnaryOp,
     symbols: &mut SymbolTable,
     count: &mut TmpCount,
     dest_type: Type) -> PoiseVal {
-        let src = emit_expression(exp, instructions, symbols, count);
+        let src = emit_converted_expr(exp, instructions, symbols, count);
         let dst = count.new_var(dest_type, symbols);
         let unary_op = match op {
             parser::UnaryOp::Negate => PoiseUnaryOp::Negate,
@@ -477,10 +527,10 @@ fn emit_short_circuit_exp(op: &parser::BinaryOp,
 
     match op {
         parser::BinaryOp::LogicalAnd => {
-            let v1 = emit_expression(exp1, instructions, symbols, count);
+            let v1 = emit_converted_expr(exp1, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfZero { condition: v1.clone(), identifier: false_label.clone() });
 
-            let v2 = emit_expression(exp2, instructions, symbols, count);
+            let v2 = emit_converted_expr(exp2, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfZero { condition: v2.clone(), identifier: false_label.clone() });
 
             instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(1)), dst: dst.clone()});
@@ -491,10 +541,10 @@ fn emit_short_circuit_exp(op: &parser::BinaryOp,
             dst
         },
         parser::BinaryOp::LogicalOr => {
-            let v1 = emit_expression(exp1, instructions, symbols, count);
+            let v1 = emit_converted_expr(exp1, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfNotZero { condition: v1.clone(), identifier: true_label.clone() });
 
-            let v2 = emit_expression(exp2, instructions, symbols, count);
+            let v2 = emit_converted_expr(exp2, instructions, symbols, count);
             instructions.push(PoiseInstruction::JumpIfNotZero { condition: v2.clone(), identifier: true_label.clone() });
 
             instructions.push(PoiseInstruction::Copy{src: PoiseVal::Constant(Const::Int(0)), dst: dst.clone()});

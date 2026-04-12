@@ -65,7 +65,7 @@ impl<'a> OpFixer<'a> {
                         self.offset = self.offset & !(get_alignment(&asmtype) as i32 - 1);
                         self.offset
                     });
-                    Operand::Stack(*stackoffset)
+                    Operand::Memory(Register::BP, *stackoffset)
                 }
             },
             other => other,
@@ -204,7 +204,12 @@ impl<'a> OpFixer<'a> {
 
             AsmInstruction::Push(val) => {
                 let v = self.res_op(val);
-                self.push(AsmInstruction::Push(v));
+                if v.is_xmm() {
+                    self.push(AsmInstruction::Binary(BinaryOp::Sub, AsmType::Quadword, Operand::Imm(8), Operand::Reg(Register::SP, RegSize::Quad)));
+                    self.push(AsmInstruction::Movsx(v, Operand::Memory(Register::SP, 0)));
+                } else {
+                    self.push(AsmInstruction::Push(v));
+                }
             },
 
             AsmInstruction::MovZeroExtend(src, dst) => {
@@ -244,7 +249,16 @@ impl<'a> OpFixer<'a> {
                     self.push(AsmInstruction::Cvtsi2sd(t, s, d)); 
                 }
             },
-
+            AsmInstruction::Lea(src, dst) => {
+                let (s, d) = (self.res_op(src), self.res_op(dst));
+                if !d.is_reg() {
+                    let temp = get_reg(&AsmType::Quadword, Scratch::Dest);
+                    self.push(AsmInstruction::Lea(s, temp.clone()));
+                    self.push(AsmInstruction::Mov(AsmType::Quadword, temp, d));
+                } else {
+                    self.push(AsmInstruction::Lea(s, d));
+                }
+            }
             other => self.push(other),
         }
     }

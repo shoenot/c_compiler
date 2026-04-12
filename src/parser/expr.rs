@@ -91,7 +91,7 @@ impl Parser {
                     let inner = self.parse_abstract_declarator()?;
                     Ok(AbstractDeclarator::AbstractPointer(Box::new(inner)))
                 } else {
-                    Ok(AbstractDeclarator::AbstractBase)
+                    Ok(AbstractDeclarator::AbstractPointer(Box::new(AbstractDeclarator::AbstractBase)))
                 }
             },
             TokenType::OpenParen => {

@@ -1,5 +1,4 @@
 mod stack;
-use super::*;
 
 use ordered_float::OrderedFloat;
 
@@ -187,7 +186,7 @@ impl<'a> FuncGen<'a> {
 
     fn copy_stack(&self, num: usize, param: String, param_type: AsmType) -> AsmInstruction {
             let offset = (num * 8) + 16;
-            AsmInstruction::Mov(param_type, Operand::Stack(offset as i32), Operand::Pseudo(param))
+            AsmInstruction::Mov(param_type, Operand::Memory(Register::BP, offset as i32), Operand::Pseudo(param))
     }
 
     fn copy_param(&mut self, count: &mut FuncNum, param: String) -> AsmInstruction {
@@ -332,6 +331,23 @@ impl<'a> FuncGen<'a> {
                 }
                 poise::PoiseInstruction::UIntToDouble { src, dst } => self.uint_to_double(src, dst),
                 poise::PoiseInstruction::DoubleToUInt { src, dst } => self.double_to_uint(src, dst),
+                poise::PoiseInstruction::Load { src_ptr, dst } => {
+                    let s = self.gen_operand(src_ptr);
+                    let d = self.gen_operand(dst.clone());
+                    self.push(AsmInstruction::Mov(AsmType::Quadword, s, Operand::Reg(Register::AX, RegSize::Quad)));
+                    self.push(AsmInstruction::Mov(self.get_asmtype(&dst), Operand::Memory(Register::AX, 0), d));
+                },
+                poise::PoiseInstruction::Store { src, dst_ptr } => {
+                    let s = self.gen_operand(src.clone());
+                    let d = self.gen_operand(dst_ptr);
+                    self.push(AsmInstruction::Mov(AsmType::Quadword, d, Operand::Reg(Register::AX, RegSize::Quad)));
+                    self.push(AsmInstruction::Mov(self.get_asmtype(&src), s, Operand::Memory(Register::AX, 0)));
+                },
+                poise::PoiseInstruction::GetAddress { src, dst } => {
+                    let s = self.gen_operand(src);
+                    let d = self.gen_operand(dst);
+                    self.push(AsmInstruction::Lea(s, d));
+                },
             }
         }
     }
@@ -344,7 +360,7 @@ impl<'a> FuncGen<'a> {
 
     fn copy_arg_stack(&mut self, arg: Operand, arg_type: AsmType) {
         match arg {
-            Operand::Pseudo(_) | Operand::Stack(_) | Operand::Data(_) => {
+            Operand::Pseudo(_) | Operand::Memory(..) | Operand::Data(_) => {
                 match arg_type {
                     AsmType::Longword => {
                         self.push(AsmInstruction::Mov(arg_type, arg, Operand::Reg(Register::AX, RegSize::Long)));
