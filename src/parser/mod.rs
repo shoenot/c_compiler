@@ -250,7 +250,7 @@ impl Parser {
                 let param_names = params.unwrap();
                 Decl::FuncDecl(self.parse_func_declaration(ident, datatype, param_names, storage)?)
             }
-            _ => Decl::VarDecl(self.parse_var_declaration(ident, dtype, storage)?),
+            _ => Decl::VarDecl(self.parse_var_declaration(ident, datatype, storage)?),
         };
         Ok(decl)
     }

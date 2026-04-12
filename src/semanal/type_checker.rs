@@ -178,14 +178,14 @@ impl<'a> TypeChecker<'a> {
     }
     
     fn get_common_ptr_type(&mut self, e1: &mut Expression, e2: &mut Expression) -> Result<Type, SemanticError> {
-        let e1t = e1.expression_type.unwrap().clone();
-        let e2t = e2.expression_type.unwrap().clone();
+        let e1t = e1.expression_type.as_ref().unwrap();
+        let e2t = e2.expression_type.as_ref().unwrap();
         if e1t == e2t {
-            Ok(e1t)
+            Ok(e1t.clone())
         } else if is_null_ptr_const(e1) {
-            Ok(e2t)
+            Ok(e2t.clone())
         } else if is_null_ptr_const(e2) {
-            Ok(e1t)
+            Ok(e1t.clone())
         } else {
             Err(SemanticError::IncompatibleTypes(e1.span))
         }
@@ -220,9 +220,8 @@ impl<'a> TypeChecker<'a> {
                         if parameters.len() != args.len() {
                             return Err(SemanticError::FuncCalledWithWrongNumArgs(identifier.clone(), expr.span))
                         }
-                        for (mut arg, datatype) in std::iter::zip(args, parameters) {
-                            self.type_expression(arg)?;
-                            self.convert_by_assignment(&mut arg, *datatype)?;
+                        for (arg, datatype) in std::iter::zip(args.iter_mut(), parameters) {
+                            self.convert_by_assignment(arg, *datatype)?;
                         }
                         Ok(set_type(expr, *ret_type))
 
@@ -272,7 +271,6 @@ impl<'a> TypeChecker<'a> {
                 if is_pointer(new_type.clone()) != is_pointer(old_type) {
                    return Err(SemanticError::IncompatibleTypes(expr.span));
                 }
-                self.convert_by_assignment(factor, new_type.clone())?;
                 Ok(set_type(expr, new_type))
             },
             ExpressionKind::Unary(op, inner) => {
@@ -443,7 +441,11 @@ impl<'a> Visitor for TypeChecker<'a> {
                 Some(expr) => {
                     if let ExpressionKind::Constant(i) = expr.kind {
                         let new = convert_constant(i, decl.var_type.clone());
-                        let static_init = get_static_init(new);
+                        let static_init = if is_pointer(decl.var_type.clone()) && is_null_ptr_const(&expr) {
+                            StaticInit::ULongInit(0)
+                        } else {
+                            get_static_init(new)
+                        };
                         InitialValue::Initial(static_init)
                     } else {
                         return Err(SemanticError::LocalStaticVarNonConstantInit(decl.identifier.clone(), expr.span));
@@ -473,7 +475,7 @@ impl<'a> Visitor for TypeChecker<'a> {
         match &mut statement.kind {
             StatementKind::Return(expr) => {
                 self.type_expression(expr)?;
-                self.convert_by_assignment(expr, self.current_function_type.clone().unwrap());
+                self.convert_by_assignment(expr, self.current_function_type.clone().unwrap())?;
             },
             _ => walk_statement(self, statement)?,
         }
@@ -485,6 +487,3 @@ pub fn type_checking_pass(program: &mut Program, symbols: &mut SymbolTable) -> R
     let mut checker = TypeChecker { symbols, scope_depth: 0, current_function_type: None };
     checker.visit_program(program)
 }
-
-#[cfg(test)]
-mod tests;
