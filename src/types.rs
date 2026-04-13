@@ -20,7 +20,7 @@ impl Type {
             Type::Long => 64,
             Type::ULong => 64,
             Type::Pointer(_) => 64,
-            Type::Double => unreachable!(),
+            Type::Double => 64,
             Type::FuncType { .. } => unreachable!(),
         }
     }
@@ -35,6 +35,14 @@ impl Type {
             Type::Double => unreachable!(),
             Type::FuncType { .. } => unreachable!(),
         }
+    }
+
+    pub fn is_pointer(&self) -> bool {
+        matches!(self, Type::Pointer(_))
+    }
+
+    pub fn is_double(&self) -> bool {
+        matches!(self, Type::Double)
     }
 }
 

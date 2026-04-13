@@ -43,10 +43,6 @@ fn get_common_type(t1: Type, t2: Type) -> Type {
     } else if t1.size() > t2.size() { t1 } else { t2 }
 }
 
-fn is_pointer(dtype: Type) -> bool {
-    matches!(dtype, Type::Pointer(_))
-}
-
 fn convert_type(expr: &mut Expression, datatype: Type) {
     if *expr.expression_type.as_mut().unwrap() != datatype {
         expr.kind = ExpressionKind::Cast(datatype.clone(), Box::new(expr.clone()));
@@ -81,7 +77,7 @@ pub fn convert_constant(constant: Const, into: Type) -> Const {
         Const::UInt(v) => v as u128,
         Const::ULong(v) => v as u128,
         Const::Double(OrderedFloat(v)) => {
-            if matches!(into, Type::Double) {
+            if into.is_double() {
                 return constant;
             } else {
                 v as u128
@@ -126,15 +122,43 @@ pub fn is_extern<T: HasStorage>(decl: &T) -> bool {
     decl.storage_class() == Some(StorageClass::Extern)
 }
 
+pub fn check_binary_type(dtype: &Type, op: &BinaryOp, span: Span) -> Result<(), SemanticError> {
+    // Can't do mod or bitwise ops with doubles
+    if dtype.is_double() {
+        if matches!(op, BinaryOp::Remainder) {
+            return Err(SemanticError::RemainderFloat(span));
+        }
+        if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift |
+                        BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr |
+                        BinaryOp::BitwiseXor) {
+            return Err(SemanticError::BitwiseWithDouble(span))
+        }
+    }
+    
+    // Can't do mult/div/mod or bitwise ops with pointers
+    if dtype.is_pointer() {
+        if matches!(op, BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::Remainder) {
+            return Err(SemanticError::InvalidPointerOp(span));
+        }
+        if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift |
+                        BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr |
+                        BinaryOp::BitwiseXor) {
+            return Err(SemanticError::BitwiseWithPointer(span))
+        }
+    }
+
+    Ok(())
+}
+
 impl<'a> TypeChecker<'a> {
     fn check_global_var(&mut self, decl: &mut VarDeclaration) -> Result<(), SemanticError> {
         let mut initial_value = match &decl.init {
             Some(expr) => {
                 if let ExpressionKind::Constant(i) = expr.kind {
                     let new = convert_constant(i, decl.var_type.clone());
-                    let static_init = if is_pointer(decl.var_type.clone()) && is_null_ptr_const(&expr) {
+                    let static_init = if decl.var_type.is_pointer() && is_null_ptr_const(&expr) {
                         StaticInit::ULongInit(0)
-                    } else if is_pointer(decl.var_type.clone()) {
+                    } else if decl.var_type.is_pointer() {
                         return Err(SemanticError::IncompatibleTypes(decl.span));
                     } else {
                         get_static_init(new)
@@ -261,7 +285,7 @@ impl<'a> TypeChecker<'a> {
 
                 let exp1_type = self.type_expression(exp1)?;
                 let exp2_type = self.convert_by_assignment(exp2, exp1_type.clone())?;
-                if is_pointer(exp1_type.clone()) || is_pointer(exp2_type.clone()) {
+                if exp1_type.is_pointer() || exp2_type.is_pointer() {
 
                 }
                 Ok(set_type(expr, exp1_type))
@@ -277,29 +301,21 @@ impl<'a> TypeChecker<'a> {
                 let exp1_type = self.type_expression(exp1)?;
                 let exp2_type = self.type_expression(exp2)?;
 
-                let common_type = if matches!(exp1_type, Type::Pointer(_)) || matches!(exp2_type, Type::Pointer(_)) {
+                let common_type = if exp1_type.is_pointer() || exp2_type.is_pointer() {
                     self.get_common_ptr_type(exp1.clone().as_mut(), exp2.clone().as_mut())? 
                 } else {
                     get_common_type(exp1_type.clone(), exp2_type.clone())
                 };
-
-                if is_pointer(exp1_type.clone()) {
-                    if !matches!(op, BinaryOp::Add | BinaryOp::Subtract) {
-                        return Err(SemanticError::InvalidPointerOp(expr.span));
-                    }
-                    if !INTEGER_TYPES.contains(&exp2_type) {
-                        return Err(SemanticError::IncompatibleTypes(expr.span));
-                    }
-                    *comp_type = Some(common_type);
-                } 
-                else if ARITHMETIC_TYPES.contains(&exp1_type) && ARITHMETIC_TYPES.contains(&exp2_type) {
-
+                
+                check_binary_type(&common_type, &op, expr.span)?;
+                
+                if ARITHMETIC_TYPES.contains(&exp1_type) && ARITHMETIC_TYPES.contains(&exp2_type) {
                     if !matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
                         convert_type(exp2, common_type.clone());
+                        *comp_type = Some(common_type);
+                    } else {
+                        *comp_type = Some(exp1_type.clone());
                     }
-
-                    *comp_type = Some(common_type);
-
                 } else {
                     return Err(SemanticError::IncompatibleTypes(expr.span));
                 }
@@ -318,11 +334,11 @@ impl<'a> TypeChecker<'a> {
             ExpressionKind::Cast(t, factor) => {
                 let old_type = self.type_expression(factor)?;
                 let new_type = t.clone();
-                if is_pointer(new_type.clone()) || is_pointer(old_type.clone()) {
-                    if !is_pointer(old_type.clone()) && !INTEGER_TYPES.contains(&old_type) {
+                if new_type.is_pointer() || old_type.is_pointer() {
+                    if !old_type.is_pointer() && !INTEGER_TYPES.contains(&old_type) {
                         return Err(SemanticError::IncompatibleTypes(expr.span))
                     }
-                    if !is_pointer(new_type.clone()) && !INTEGER_TYPES.contains(&new_type) {
+                    if !new_type.is_pointer() && !INTEGER_TYPES.contains(&new_type) {
                         return Err(SemanticError::IncompatibleTypes(expr.span))
                     }
                 }
@@ -332,7 +348,7 @@ impl<'a> TypeChecker<'a> {
                 let inner_exp = self.type_expression(inner)?;
                 if inner_exp == Type::Double && matches!(op, UnaryOp::Complement) {
                     Err(SemanticError::ComplementFloat(expr.span))
-                } else if is_pointer(inner_exp.clone()) && matches!(op, UnaryOp::Complement | UnaryOp::Negate) {
+                } else if inner_exp.is_pointer() && matches!(op, UnaryOp::Complement | UnaryOp::Negate) {
                     Err(SemanticError::InvalidPointerOp(expr.span))
                 } else {
                     if *op == UnaryOp::Not {
@@ -348,39 +364,33 @@ impl<'a> TypeChecker<'a> {
                 if matches!(op, BinaryOp::LogicalOr | BinaryOp::LogicalAnd ) {
                     Ok(set_type(expr, Type::Int))
                 } else {
-                    let common_type = if matches!(exp1_type, Type::Pointer(_)) || matches!(exp2_type, Type::Pointer(_)) {
+                    let common_type = if exp1_type.is_pointer() || exp2_type.is_pointer() {
                         self.get_common_ptr_type(exp1.clone().as_mut(), exp2.clone().as_mut())? 
                     } else {
                         get_common_type(exp1_type.clone(), exp2_type.clone())
                     };
+
+                    // Don't convert to common type if its a bit shift
                     if !matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift ) {
                         convert_type(exp1, common_type.clone());
                         convert_type(exp2, common_type.clone());
                     }
-                    if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift |
-                                    BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr |
-                                    BinaryOp::BitwiseXor) {
-                        if matches!(common_type, Type::Double) {
-                            return Err(SemanticError::BitwiseWithDouble(expr.span))
-                        }
-                    }
-                    if is_pointer(common_type.clone()) && matches!(op, BinaryOp::Multiply |
-                                                          BinaryOp::Divide | BinaryOp::Remainder) {
-                        return Err(SemanticError::InvalidPointerOp(expr.span));
-                    }
+
+                    check_binary_type(&common_type, &op, expr.span)?;
+                    
+                    // Comparision expressions are always int type
                     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual |
                                     BinaryOp::GreaterThan | BinaryOp::LessThan |
                                     BinaryOp::GreaterOrEqual | BinaryOp::LessOrEqual) {
                         Ok(set_type(expr, Type::Int))
-                    } else if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
+                    } 
+                    
+                    // Bit shift expressions are always the type of the value being shifted
+                    else if matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
                         Ok(set_type(expr, exp1_type))
-                    } else {
-                        if matches!(op, BinaryOp::Remainder) && matches!(common_type, Type::Double) {
-                            Err(SemanticError::RemainderFloat(expr.span))
-                        } else {
-                            Ok(set_type(expr, common_type))
-                        }
-                    }
+                    } 
+
+                    else { Ok(set_type(expr, common_type)) }
                 } 
             },
             ExpressionKind::PrefixIncrement(x) | ExpressionKind::PostfixIncrement(x) |
@@ -500,7 +510,7 @@ impl<'a> Visitor for TypeChecker<'a> {
                 Some(expr) => {
                     if let ExpressionKind::Constant(i) = expr.kind {
                         let new = convert_constant(i, decl.var_type.clone());
-                        let static_init = if is_pointer(decl.var_type.clone()) && is_null_ptr_const(&expr) {
+                        let static_init = if decl.var_type.is_pointer() && is_null_ptr_const(&expr) {
                             StaticInit::ULongInit(0)
                         } else {
                             get_static_init(new)
