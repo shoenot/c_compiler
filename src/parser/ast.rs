@@ -166,6 +166,7 @@ pub enum ExpressionKind {
     Var(String),
     Cast(Type, Box<Expression>),
     Assignment(Box<Expression>, Box<Expression>),
+    CompoundAssignment(BinaryOp, Box<Expression>, Box<Expression>, Option<Type>),
     Unary(UnaryOp, Box<Expression>),
     Binary(BinaryOp, Box<Expression>, Box<Expression>),
     Conditional(Box<Expression>, Box<Expression>, Box<Expression>),

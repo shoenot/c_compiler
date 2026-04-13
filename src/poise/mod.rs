@@ -3,7 +3,6 @@ use crate::types::*;
 use crate::parser::Const;
 use crate::semanal::type_checker::{
     get_static_init, 
-    dump_static_init,
     convert_constant,
 };
 
@@ -126,6 +125,35 @@ fn loop_label_string(lab: String, labtype: &str) -> String {
     ret.into()
 }
 
+fn emit_type_conversion(
+    src_val: PoiseVal,
+    src_type: &Type,
+    dst_type: &Type,
+    instructions: &mut Vec<PoiseInstruction>,
+    symbols: &mut SymbolTable,
+    count: &mut TmpCount) -> PoiseVal {
+
+    if src_type == dst_type {
+        return src_val;
+    }
+
+    let dst_val = count.new_var(dst_type.clone(), symbols);
+
+    if *src_type == Type::Double {
+        if dst_type.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: src_val, dst: dst_val.clone() }); } 
+        else { instructions.push(PoiseInstruction::DoubleToUInt { src: src_val, dst: dst_val.clone() }); }
+    } else if *dst_type == Type::Double {
+        if src_type.is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: src_val, dst: dst_val.clone() }); } 
+        else { instructions.push(PoiseInstruction::UIntToDouble { src: src_val, dst: dst_val.clone() }); }
+    } 
+    else if src_type.size() == dst_type.size() { instructions.push(PoiseInstruction::Copy { src: src_val, dst: dst_val.clone() }); } 
+    else if src_type.size() > dst_type.size() { instructions.push(PoiseInstruction::Truncate { src: src_val, dst: dst_val.clone() }); } 
+    else if src_type.is_signed() { instructions.push(PoiseInstruction::SignExtend { src: src_val, dst: dst_val.clone() }); } 
+    else { instructions.push(PoiseInstruction::ZeroExtend { src: src_val, dst: dst_val.clone() }); }
+
+    dst_val
+}
+
 pub fn gen_poise(tree: &parser::Program, symbols: &mut SymbolTable) -> PoiseProg {
     let mut count = TmpCount{var_counter: 0, label_counter: 0};
     let mut top_level_items = Vec::new();
@@ -182,21 +210,9 @@ fn gen_inst_var_declaration(
         let val = emit_converted_expr(exp, instructions, symbols, count);
         let s = get_type(exp);
         let d = symbols.get(&declaration.identifier).unwrap().datatype.clone();
-        let tmp = count.new_var(d.clone(), symbols);
-        let val = {
-            if s == d { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
-            else if s == Type::Double {
-                if d.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: val, dst: tmp.clone() }); tmp }
-                else { instructions.push(PoiseInstruction::DoubleToUInt { src: val, dst: tmp.clone() }); tmp }
-            } else if d == Type::Double {
-                if s.is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: val, dst: tmp.clone() }); tmp }
-                else { instructions.push(PoiseInstruction::UIntToDouble { src: val, dst: tmp.clone() }); tmp }
-            } else if s.size() == d.size() { instructions.push(PoiseInstruction::Copy { src: val, dst: tmp.clone() }); tmp }
-            else if s.size() > d.size() { instructions.push(PoiseInstruction::Truncate { src: val, dst: tmp.clone() }); tmp }
-            else if s.is_signed() { instructions.push(PoiseInstruction::SignExtend { src: val, dst: tmp.clone() }); tmp }
-            else { instructions.push(PoiseInstruction::ZeroExtend { src: val, dst: tmp.clone() }); tmp }
-        };
-        instructions.push(PoiseInstruction::Copy { src: val, dst: PoiseVal::Variable(declaration.identifier.clone()) });
+
+        let conv = emit_type_conversion(val, &s, &d, instructions, symbols, count);
+        instructions.push(PoiseInstruction::Copy { src: conv, dst: PoiseVal::Variable(declaration.identifier.clone()) });
     }
 }
 
@@ -304,6 +320,73 @@ fn gen_inst_statement(
     }
 }
 
+fn prefix_op(expr: &parser::Expression, instructions: &mut Vec<PoiseInstruction>, symbols: &mut SymbolTable, count: &mut TmpCount) -> ExpRes {
+    let (e, incr) = match &expr.kind {
+        parser::ExpressionKind::PrefixIncrement(exp) => (exp, true),
+        parser::ExpressionKind::PrefixDecrement(exp) => (exp, false),
+        _ => unreachable!(),
+    };
+    let lval = emit_expr_result(e, instructions, symbols, count);
+    match lval {
+        ExpRes::Plain(v) => {
+            instructions.push(PoiseInstruction::Binary{
+                op: if incr { PoiseBinaryOp::Add } else { PoiseBinaryOp::Subtract },
+                src1: v.clone(),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
+                dst: v.clone(),
+            });
+            ExpRes::Plain(v)
+        },
+        ExpRes::Deref(ptr) => {
+            let tmp = count.new_var(get_type(expr), symbols);
+            instructions.push(PoiseInstruction::Load { src_ptr: ptr.clone(), dst: tmp.clone() });
+            instructions.push(PoiseInstruction::Binary{
+                op: if incr { PoiseBinaryOp::Add } else { PoiseBinaryOp::Subtract },
+                src1: tmp.clone(),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(expr))),
+                dst: tmp.clone(),
+            });
+            instructions.push(PoiseInstruction::Store { src: tmp.clone(), dst_ptr: ptr.clone() });
+            ExpRes::Plain(tmp)
+        }
+    }
+}
+
+fn postfix_op(expr: &parser::Expression, instructions: &mut Vec<PoiseInstruction>, symbols: &mut SymbolTable, count: &mut TmpCount) -> ExpRes {
+    let (e, incr) = match &expr.kind {
+        parser::ExpressionKind::PostfixIncrement(exp) => (exp, true),
+        parser::ExpressionKind::PostfixDecrement(exp) => (exp, false),
+        _ => unreachable!(),
+    };
+    let lval = emit_expr_result(e, instructions, symbols, count);
+    let orig = count.new_var(get_type(e), symbols);
+    match lval {
+        ExpRes::Plain(v) => {
+            instructions.push(PoiseInstruction::Copy { src: v.clone(), dst: orig.clone() });
+            instructions.push(PoiseInstruction::Binary{
+                op: if incr { PoiseBinaryOp::Add } else { PoiseBinaryOp::Subtract },
+                src1: v.clone(),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
+                dst: v.clone(),
+            });
+            ExpRes::Plain(orig)
+        },
+        ExpRes::Deref(ptr) => {
+            let tmp = count.new_var(get_type(expr), symbols);
+            instructions.push(PoiseInstruction::Load { src_ptr: ptr.clone(), dst: tmp.clone() });
+            instructions.push(PoiseInstruction::Copy { src: tmp.clone(), dst: orig.clone() });
+            instructions.push(PoiseInstruction::Binary{
+                op: if incr { PoiseBinaryOp::Add } else { PoiseBinaryOp::Subtract },
+                src1: tmp.clone(),
+                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(expr))),
+                dst: tmp.clone(),
+            });
+            instructions.push(PoiseInstruction::Store { src: tmp.clone(), dst_ptr: ptr.clone() });
+            ExpRes::Plain(orig)
+        },
+    }
+}
+
 // Constructs IR instructions and returns the destination
 fn emit_expr_result(
     expr: &parser::Expression,
@@ -329,6 +412,32 @@ fn emit_expr_result(
                 },
             }
         },
+        parser::ExpressionKind::CompoundAssignment(op, lhs, rhs, topt) => {
+            let lval = emit_expr_result(lhs, instructions, symbols, count);
+            let rval = emit_converted_expr(rhs, instructions, symbols, count);
+            let ltype = get_type(lhs);
+            let ctype = topt.clone().unwrap();
+            match lval {
+                ExpRes::Plain(ref obj) => {
+                    let pre_op = emit_type_conversion(obj.clone(), &ltype, &ctype, instructions, symbols, count);
+                    let op_res = count.new_var(ctype.clone(), symbols);
+                    instructions.push(PoiseInstruction::Binary { op: get_bin_op(op), src1: pre_op, src2: rval, dst: op_res.clone() });
+                    let post_op = emit_type_conversion(op_res, &ctype, &ltype, instructions, symbols, count);
+                    instructions.push(PoiseInstruction::Copy { src: post_op, dst: obj.clone() });
+                    lval
+                },
+                ExpRes::Deref(ref ptr) => {
+                    let tmp = count.new_var(ltype.clone(), symbols);
+                    instructions.push(PoiseInstruction::Load { src_ptr: ptr.clone(), dst: tmp.clone() });
+                    let pre_op = emit_type_conversion(tmp.clone(), &ltype, &ctype, instructions, symbols, count);
+                    let op_res = count.new_var(ctype.clone(), symbols);
+                    instructions.push(PoiseInstruction::Binary { op: get_bin_op(op), src1: pre_op, src2: rval, dst: op_res.clone() });
+                    let post_op = emit_type_conversion(op_res, &ctype, &ltype, instructions, symbols, count);
+                    instructions.push(PoiseInstruction::Store { src: post_op, dst_ptr: ptr.clone() });
+                    lval
+                },
+            }
+        },
         parser::ExpressionKind::Conditional(c, y, n) => {
             let cond = count.new_var(get_type(c), symbols);
             let eval = emit_converted_expr(c, instructions, symbols, count);
@@ -349,49 +458,11 @@ fn emit_expr_result(
             instructions.push(PoiseInstruction::Label(yes_label));
             ExpRes::Plain(dest)
         },
-        parser::ExpressionKind::PrefixIncrement(e) => {
-            let var = emit_converted_expr(e, instructions, symbols, count);
-            instructions.push(PoiseInstruction::Binary{
-                op: PoiseBinaryOp::Add,
-                src1: var.clone(),
-                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
-                dst: var.clone(),
-            });
-            ExpRes::Plain(var)
+        parser::ExpressionKind::PrefixIncrement(_) | parser::ExpressionKind::PrefixDecrement(_) => {
+            prefix_op(expr, instructions, symbols, count)
         },
-        parser::ExpressionKind::PrefixDecrement(e) => {
-            let var = emit_converted_expr(e, instructions, symbols, count);
-            instructions.push(PoiseInstruction::Binary{
-                op: PoiseBinaryOp::Subtract,
-                src1: var.clone(),
-                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
-                dst: var.clone(),
-            });
-            ExpRes::Plain(var)
-        },
-        parser::ExpressionKind::PostfixIncrement(e) => {
-            let var = emit_converted_expr(e, instructions, symbols, count);
-            let tmp = count.new_var(get_type(e), symbols);
-            instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
-            instructions.push(PoiseInstruction::Binary{
-                op: PoiseBinaryOp::Add,
-                src1: var.clone(),
-                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
-                dst: var.clone(),
-            });
-            ExpRes::Plain(tmp)
-        },
-        parser::ExpressionKind::PostfixDecrement(e) => {
-            let var = emit_converted_expr(e, instructions, symbols, count);
-            let tmp = count.new_var(get_type(e), symbols);
-            instructions.push(PoiseInstruction::Copy { src: var.clone(), dst: tmp.clone() });
-            instructions.push(PoiseInstruction::Binary{
-                op: PoiseBinaryOp::Subtract,
-                src1: var.clone(),
-                src2: PoiseVal::Constant(convert_constant(Const::Int(1), get_type(e))),
-                dst: var.clone(),
-            });
-            ExpRes::Plain(tmp)
+        parser::ExpressionKind::PostfixIncrement(_) | parser::ExpressionKind::PostfixDecrement(_) => {
+            postfix_op(expr, instructions, symbols, count)
         },
         parser::ExpressionKind::FunctionCall(ident, args) => {
             let mut poiseargs = Vec::new();
@@ -407,23 +478,8 @@ fn emit_expr_result(
         },
         parser::ExpressionKind::Cast(t, e) => {
             let var = emit_converted_expr(e, instructions, symbols, count);
-            if *t == get_type(e) {
-                ExpRes::Plain(var)
-            } else if *t == Type::Double {
-                let dst = count.new_var(t.clone(), symbols);
-                if get_type(e).is_signed() { instructions.push(PoiseInstruction::IntToDouble { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-                else { instructions.push(PoiseInstruction::UIntToDouble { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-            } else if get_type(e) == Type::Double {
-                let dst = count.new_var(t.clone(), symbols);
-                if t.is_signed() { instructions.push(PoiseInstruction::DoubleToInt { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-                else { instructions.push(PoiseInstruction::DoubleToUInt { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-            } else {
-                let dst = count.new_var(t.clone(), symbols);
-                if t.size() == get_type(e).size() { instructions.push(PoiseInstruction::Copy { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-                else if t.size() < get_type(e).size() { instructions.push(PoiseInstruction::Truncate { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-                else if get_type(e).is_signed() { instructions.push(PoiseInstruction::SignExtend { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-                else { instructions.push(PoiseInstruction::ZeroExtend { src: var, dst: dst.clone() }); ExpRes::Plain(dst) }
-            }
+            let conv = emit_type_conversion(var, &get_type(e), t, instructions, symbols, count);
+            ExpRes::Plain(conv)
         },
         parser::ExpressionKind::Dereference(p) => {
             let res = emit_converted_expr(p, instructions, symbols, count);
@@ -461,6 +517,28 @@ fn emit_converted_expr(
     }
 }
 
+fn get_bin_op(op: &parser::BinaryOp) -> PoiseBinaryOp {
+    match op {
+        parser::BinaryOp::Add => PoiseBinaryOp::Add,
+        parser::BinaryOp::Subtract => PoiseBinaryOp::Subtract,
+        parser::BinaryOp::Multiply => PoiseBinaryOp::Multiply,
+        parser::BinaryOp::Divide => PoiseBinaryOp::Divide,
+        parser::BinaryOp::Remainder => PoiseBinaryOp::Remainder,
+        parser::BinaryOp::LeftShift => PoiseBinaryOp::LeftShift,
+        parser::BinaryOp::RightShift => PoiseBinaryOp::RightShift,
+        parser::BinaryOp::BitwiseAnd => PoiseBinaryOp::BitwiseAnd,
+        parser::BinaryOp::BitwiseOr => PoiseBinaryOp::BitwiseOr,
+        parser::BinaryOp::BitwiseXor => PoiseBinaryOp::BitwiseXor,
+        parser::BinaryOp::Equal => PoiseBinaryOp::Equal,
+        parser::BinaryOp::NotEqual => PoiseBinaryOp::NotEqual,
+        parser::BinaryOp::LessThan => PoiseBinaryOp::LessThan,
+        parser::BinaryOp::GreaterThan => PoiseBinaryOp::GreaterThan,
+        parser::BinaryOp::LessOrEqual => PoiseBinaryOp::LessOrEqual,
+        parser::BinaryOp::GreaterOrEqual => PoiseBinaryOp::GreaterOrEqual,
+        _ => unreachable!()
+    }
+}
+
 fn emit_bin_exp(op: &parser::BinaryOp,
     exp1: &parser::Expression,
     exp2: &parser::Expression,
@@ -469,26 +547,10 @@ fn emit_bin_exp(op: &parser::BinaryOp,
     count: &mut TmpCount,
     dest_type: Type) -> PoiseVal {
         let binop = match op {
-            parser::BinaryOp::LogicalAnd | parser::BinaryOp::LogicalOr => {
+            parser::BinaryOp::LogicalOr | parser::BinaryOp::LogicalAnd => {
                 return emit_short_circuit_exp(op, exp1, exp2, instructions, symbols, count);
             },
-            parser::BinaryOp::Add => PoiseBinaryOp::Add,
-            parser::BinaryOp::Subtract => PoiseBinaryOp::Subtract,
-            parser::BinaryOp::Multiply => PoiseBinaryOp::Multiply,
-            parser::BinaryOp::Divide => PoiseBinaryOp::Divide,
-            parser::BinaryOp::Remainder => PoiseBinaryOp::Remainder,
-            parser::BinaryOp::LeftShift => PoiseBinaryOp::LeftShift,
-            parser::BinaryOp::RightShift => PoiseBinaryOp::RightShift,
-            parser::BinaryOp::BitwiseAnd => PoiseBinaryOp::BitwiseAnd,
-            parser::BinaryOp::BitwiseOr => PoiseBinaryOp::BitwiseOr,
-            parser::BinaryOp::BitwiseXor => PoiseBinaryOp::BitwiseXor,
-            parser::BinaryOp::Equal => PoiseBinaryOp::Equal,
-            parser::BinaryOp::NotEqual => PoiseBinaryOp::NotEqual,
-            parser::BinaryOp::LessThan => PoiseBinaryOp::LessThan,
-            parser::BinaryOp::GreaterThan => PoiseBinaryOp::GreaterThan,
-            parser::BinaryOp::LessOrEqual => PoiseBinaryOp::LessOrEqual,
-            parser::BinaryOp::GreaterOrEqual => PoiseBinaryOp::GreaterOrEqual,
-            _ => unreachable!()
+            _ => get_bin_op(op),
         };
         let v1 = emit_converted_expr(exp1, instructions, symbols, count);
         let v2 = emit_converted_expr(exp2, instructions, symbols, count);

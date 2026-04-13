@@ -119,6 +119,7 @@ pub fn walk_statement<V: Visitor + ?Sized>(v: &mut V, statement: &mut Statement)
 pub fn walk_expression<V: Visitor + ?Sized>(v: &mut V, expression: &mut Expression) -> Result<(), SemanticError> {
     match &mut expression.kind {
         ExpressionKind::Assignment(exp1, exp2) |
+        ExpressionKind::CompoundAssignment(_, exp1, exp2, _) |
         ExpressionKind::Binary(_, exp1, exp2) => {
             v.visit_expression(exp1.as_mut())?;
             v.visit_expression(exp2.as_mut())?;

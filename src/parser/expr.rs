@@ -26,8 +26,7 @@ impl Parser {
                 }
                 BinaryOp::OpSet(op) => {
                     let right = self.parse_expression(prec)?;
-                    let binary = self.new_expr(ExpressionKind::Binary(*op, Box::new(left.clone()), Box::new(right)));
-                    left = self.new_expr(ExpressionKind::Assignment(Box::new(left), Box::new(binary)));
+                    left = self.new_expr(ExpressionKind::CompoundAssignment(*op, Box::new(left), Box::new(right), None));
                 }
                 BinaryOp::Ternary => {
                     let middle = self.parse_conditional_middle()?;

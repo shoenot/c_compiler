@@ -167,6 +167,10 @@ impl Visitor for IdentResolver {
                 self.visit_expression(lhs.as_mut())?;
                 self.visit_expression(rhs.as_mut())?;
             },
+            ExpressionKind::CompoundAssignment(_, lhs, rhs, _) => {
+                self.visit_expression(lhs.as_mut())?;
+                self.visit_expression(rhs.as_mut())?;
+            },
             ExpressionKind::PostfixIncrement(exp) | ExpressionKind::PrefixIncrement(exp) | 
             ExpressionKind::PostfixDecrement(exp) | ExpressionKind::PrefixDecrement(exp) => {
                 self.visit_expression(exp.as_mut())?;

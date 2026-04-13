@@ -253,17 +253,58 @@ impl<'a> TypeChecker<'a> {
             ExpressionKind::Assignment(exp1, exp2) => {
                 if let ExpressionKind::FunctionCall(ident, _) = &**exp1.as_ref() {
                     return Err(SemanticError::FuncUsedAsVar(ident.clone(), expr.span));
-                } else {
-                    if !is_lvalue(exp1) {
-                        return Err(SemanticError::InvalidLValue(expr.span));
-                    }
-                    let exp1_type = self.type_expression(exp1)?;
-                    let exp2_type = self.convert_by_assignment(exp2, exp1_type.clone())?;
-                    if is_pointer(exp1_type.clone()) || is_pointer(exp2_type.clone()) {
+                } 
 
-                    }
-                    Ok(set_type(expr, exp1_type))
+                if !is_lvalue(exp1) {
+                    return Err(SemanticError::InvalidLValue(expr.span));
                 }
+
+                let exp1_type = self.type_expression(exp1)?;
+                let exp2_type = self.convert_by_assignment(exp2, exp1_type.clone())?;
+                if is_pointer(exp1_type.clone()) || is_pointer(exp2_type.clone()) {
+
+                }
+                Ok(set_type(expr, exp1_type))
+            },
+            ExpressionKind::CompoundAssignment(op, exp1, exp2, comp_type) => {
+                if let ExpressionKind::FunctionCall(ident, _) = &**exp1.as_ref() {
+                    return Err(SemanticError::FuncUsedAsVar(ident.clone(), expr.span));
+                }
+                if !is_lvalue(exp1) {
+                    return Err(SemanticError::InvalidLValue(expr.span));
+                }
+
+                let exp1_type = self.type_expression(exp1)?;
+                let exp2_type = self.type_expression(exp2)?;
+
+                let common_type = if matches!(exp1_type, Type::Pointer(_)) || matches!(exp2_type, Type::Pointer(_)) {
+                    self.get_common_ptr_type(exp1.clone().as_mut(), exp2.clone().as_mut())? 
+                } else {
+                    get_common_type(exp1_type.clone(), exp2_type.clone())
+                };
+
+                if is_pointer(exp1_type.clone()) {
+                    if !matches!(op, BinaryOp::Add | BinaryOp::Subtract) {
+                        return Err(SemanticError::InvalidPointerOp(expr.span));
+                    }
+                    if !INTEGER_TYPES.contains(&exp2_type) {
+                        return Err(SemanticError::IncompatibleTypes(expr.span));
+                    }
+                    *comp_type = Some(common_type);
+                } 
+                else if ARITHMETIC_TYPES.contains(&exp1_type) && ARITHMETIC_TYPES.contains(&exp2_type) {
+
+                    if !matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
+                        convert_type(exp2, common_type.clone());
+                    }
+
+                    *comp_type = Some(common_type);
+
+                } else {
+                    return Err(SemanticError::IncompatibleTypes(expr.span));
+                }
+
+                Ok(set_type(expr, exp1_type))
             },
             ExpressionKind::Constant(c) => {
                 match c {
@@ -344,8 +385,12 @@ impl<'a> TypeChecker<'a> {
             },
             ExpressionKind::PrefixIncrement(x) | ExpressionKind::PostfixIncrement(x) |
             ExpressionKind::PrefixDecrement(x) | ExpressionKind::PostfixDecrement(x) => {
-                let exp_type = self.type_expression(x)?;
-                Ok(set_type(expr, exp_type))
+                if !is_lvalue(x) {
+                    Err(SemanticError::InvalidLValue(expr.span))
+                } else {
+                    let exp_type = self.type_expression(x)?;
+                    Ok(set_type(expr, exp_type))
+                }
             },
             ExpressionKind::Conditional(cond, exp1, exp2) => {
                 let exp1_type = self.type_expression(exp1)?;
