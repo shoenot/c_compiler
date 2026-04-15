@@ -13,6 +13,10 @@ pub trait Visitor {
         walk_var_decl(self, var)
     }
 
+    fn visit_init(&mut self, init: &mut Init) -> Result<(), SemanticError> {
+        walk_init(self, init)
+    }
+
     fn visit_func_decl(&mut self, func: &mut FuncDeclaration) -> Result<(), SemanticError> {
         walk_func_decl(self, func)
     }
@@ -56,8 +60,20 @@ pub fn walk_block<V: Visitor + ?Sized>(v: &mut V, block: &mut Block) -> Result<(
 }
 
 pub fn walk_var_decl<V: Visitor + ?Sized>(v: &mut V, var: &mut VarDeclaration) -> Result<(), SemanticError> {
-    if let Some(exp) = &mut var.init {
-        v.visit_expression(exp)?;
+    if let Some(init) = &mut var.init {
+        v.visit_init(init)?;
+    }
+    Ok(())
+}
+
+pub fn walk_init<V: Visitor + ?Sized>(v: &mut V, init: &mut Init) -> Result<(), SemanticError> {
+    match init {
+        Init::S(exp) => v.visit_expression(exp)?,
+        Init::C(inits) => {
+            for init in inits {
+                v.visit_init(init)?;
+            }
+        }
     }
     Ok(())
 }

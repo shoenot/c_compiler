@@ -83,8 +83,8 @@ impl Visitor for IdentResolver {
                     has_linkage: false, 
                 });
 
-                if let Some(e) = &mut var.init {
-                    self.visit_expression(e)?;
+                if let Some(init) = &mut var.init {
+                    self.visit_init(init)?;
                 }
                 var.identifier = newname;
             }

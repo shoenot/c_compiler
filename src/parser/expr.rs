@@ -4,7 +4,7 @@ use ordered_float::OrderedFloat;
 #[derive(Debug, Clone)]
 pub enum AbstractDeclarator {
     AbstractPointer(Box<AbstractDeclarator>),
-    AbstractArray(Box<AbstractDeclarator>, i32),
+    AbstractArray(Box<AbstractDeclarator>, i64),
     AbstractBase,
 }
 
@@ -238,6 +238,12 @@ impl Parser {
                     self.advance()?;
                     expr = self.new_expr(ExpressionKind::PostfixDecrement(Box::new(expr.clone())));
                 },
+                TokenType::OpenSquare => {
+                    self.advance()?;
+                    let dim = self.parse_expression(0)?;
+                    self.expect(TokenType::CloseSquare)?;
+                    expr = self.new_expr(ExpressionKind::Subscript(Box::new(expr), Box::new(dim)));
+                }
                 _ => return Ok(expr),
             }
         }

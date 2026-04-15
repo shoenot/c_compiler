@@ -126,7 +126,7 @@ pub fn eval_constant(expr: &ExpressionKind) -> Option<i128> {
             Const::Long(i) => Some(*i as i128),
             Const::UInt(i)  => Some(*i as i128), 
             Const::ULong(i) => Some(*i as i128),
-            Const::Double(i) => panic!(),
+            Const::Double(_) => panic!(),
         }
         ExpressionKind::Unary(op, expr) => {
             let val = eval_constant(expr)?;

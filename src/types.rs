@@ -10,7 +10,7 @@ pub enum Type {
     Double,
     Pointer(Box<Type>),
     FuncType{params: Vec<Box<Type>>, ret: Box<Type>},
-    Array(Box<Type>, i32),
+    Array(Box<Type>, i64),
 }
 
 static ARITHMETIC_TYPES: &[Type] = &[Type::Int, Type::Long,

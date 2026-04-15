@@ -140,7 +140,7 @@ pub enum Declarator {
     Ident(String),
     PointerDeclarator(Box<Declarator>),
     FuncDeclarator(Vec<Parameter>, Box<Declarator>),
-    ArrayDeclarator(Box<Declarator>, i32),
+    ArrayDeclarator(Box<Declarator>, i64),
 }
 
 #[derive(Debug, Clone)]
@@ -223,13 +223,13 @@ impl Parser {
         }
     }
 
-    pub fn parse_array_dim(&mut self) -> Result<i32, ParseError> {
+    pub fn parse_array_dim(&mut self) -> Result<i64, ParseError> {
         let token = self.advance()?;
         let dimension = match token.token_type {
             TokenType::NumericConstant(n) => {
                 match n.numtype {
                     NumericType::Double => return Err(ParseError::InvalidArrayDimension(self.current_span)),
-                    _ => n.number.parse::<i32>().map_err(|_| ParseError::InvalidArrayDimension(self.current_span))?
+                    _ => n.number.parse::<i64>().map_err(|_| ParseError::InvalidArrayDimension(self.current_span))?
                 }
             },
             _ => return Err(ParseError::UnexpectedToken(token.token_type, self.current_span))
@@ -327,7 +327,6 @@ impl Parser {
                 
             } else if self.next_token_is(TokenType::OpenSquare) {
                 self.expect(TokenType::OpenSquare)?;
-                let token = self.advance()?;
                 let dimension = self.parse_array_dim()?;
                 self.expect(TokenType::CloseSquare)?;
                 
