@@ -4,6 +4,7 @@ use ordered_float::OrderedFloat;
 #[derive(Debug, Clone)]
 pub enum AbstractDeclarator {
     AbstractPointer(Box<AbstractDeclarator>),
+    AbstractArray(Box<AbstractDeclarator>, i32),
     AbstractBase,
 }
 
@@ -77,7 +78,11 @@ impl Parser {
                 let derived_type = Type::Pointer(Box::new(base_type));
                 self.process_abstract_declarator(*inner, derived_type)
             }, 
-            AbstractDeclarator::AbstractBase => Ok(base_type)
+            AbstractDeclarator::AbstractBase => Ok(base_type),
+            AbstractDeclarator::AbstractArray(inner, dim) => {
+                let derived_type = Type::Array(Box::new(base_type), dim);
+                self.process_abstract_declarator(*inner, derived_type)
+            }
         }
     }
 
@@ -86,21 +91,39 @@ impl Parser {
         match token {
             TokenType::Asterisk => {
                 self.advance()?;
-                if matches!(self.next_token_type()?, TokenType::OpenParen | TokenType::Asterisk) {
+                if matches!(self.next_token_type()?, TokenType::OpenSquare | TokenType::OpenParen | TokenType::Asterisk) {
                     let inner = self.parse_abstract_declarator()?;
                     Ok(AbstractDeclarator::AbstractPointer(Box::new(inner)))
                 } else {
                     Ok(AbstractDeclarator::AbstractPointer(Box::new(AbstractDeclarator::AbstractBase)))
                 }
             },
-            TokenType::OpenParen => {
-                self.expect(TokenType::OpenParen)?;
-                let ret = self.parse_abstract_declarator()?;
-                self.expect(TokenType::CloseParen)?;
-                Ok(ret)
-            },
+            TokenType::OpenParen | TokenType::OpenSquare => self.parse_direct_abstract_declarator(),
             _ => Err(ParseError::InvalidDeclarator(self.current_span)),
         }
+    }
+
+    fn parse_direct_abstract_declarator(&mut self) -> Result<AbstractDeclarator, ParseError> {
+        let token = self.next_token_type()?;
+
+        let mut base = match token {
+            TokenType::OpenParen => {
+                self.expect(TokenType::OpenParen)?;
+                let inner = self.parse_abstract_declarator()?;
+                self.expect(TokenType::CloseParen)?;
+                inner
+            },
+            _ => AbstractDeclarator::AbstractBase,
+        };
+
+        while self.next_token_type()? == TokenType::OpenSquare {
+            self.expect(TokenType::OpenSquare)?;
+            let dim = self.parse_array_dim()?;
+            self.expect(TokenType::CloseSquare)?;
+            base = AbstractDeclarator::AbstractArray(Box::new(base), dim);
+        }
+
+        Ok(base)
     }
 
     pub fn parse_factor(&mut self, token: Option<Token>) -> Result<Expression, ParseError> {

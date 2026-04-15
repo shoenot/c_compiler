@@ -1,4 +1,5 @@
 use std::iter::Peekable;
+use std::u32;
 use std::vec::IntoIter;
 use std::fmt;
 use crate::types::*;
@@ -28,6 +29,7 @@ pub enum ParseError {
     InvalidFloat(Span),
     MissingType(Span),
     InvalidDeclarator(Span),
+    InvalidArrayDimension(Span),
 }
 
 impl fmt::Display for ParseError {
@@ -47,6 +49,7 @@ impl fmt::Display for ParseError {
             ParseError::IntegerOverflow(s) => write!(f, "Parse Error: integer overflow!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::MissingType(s) => write!(f, "Parse Error: no type specified!\nLine: {}, Col: {}", s.line_number, s.col),
             ParseError::InvalidDeclarator(s) => write!(f, "Parse Error: invalid declarator!\nLine: {}, Col: {}", s.line_number, s.col),
+            ParseError::InvalidArrayDimension(s) => write!(f, "Parse Error: invalid array dimension! \nLine: {}, Col: {}", s.line_number, s.col),
         }
     }
 }
@@ -220,6 +223,20 @@ impl Parser {
         }
     }
 
+    pub fn parse_array_dim(&mut self) -> Result<i32, ParseError> {
+        let token = self.advance()?;
+        let dimension = match token.token_type {
+            TokenType::NumericConstant(n) => {
+                match n.numtype {
+                    NumericType::Double => return Err(ParseError::InvalidArrayDimension(self.current_span)),
+                    _ => n.number.parse::<i32>().map_err(|_| ParseError::InvalidArrayDimension(self.current_span))?
+                }
+            },
+            _ => return Err(ParseError::UnexpectedToken(token.token_type, self.current_span))
+        };
+        Ok(dimension)
+    }
+
     fn new_expr(&self, kind: ExpressionKind) -> Expression {
         Expression::new(kind, None, self.current_span)
     }
@@ -301,13 +318,27 @@ impl Parser {
     }
 
     fn parse_direct_declarator(&mut self) -> Result<Declarator, ParseError> {
-        let simple = self.parse_simple_declarator()?;
-        if self.next_token_is(TokenType::OpenParen) {
-            let params = self.parse_func_params()?;
-            Ok(Declarator::FuncDeclarator(params, Box::new(simple)))
-        } else {
-            Ok(simple)
+        let mut declarator = self.parse_simple_declarator()?;
+
+        loop {
+            if self.next_token_is(TokenType::OpenParen) {
+                let params = self.parse_func_params()?;
+                declarator = Declarator::FuncDeclarator(params, Box::new(declarator));
+                
+            } else if self.next_token_is(TokenType::OpenSquare) {
+                self.expect(TokenType::OpenSquare)?;
+                let token = self.advance()?;
+                let dimension = self.parse_array_dim()?;
+                self.expect(TokenType::CloseSquare)?;
+                
+                declarator = Declarator::ArrayDeclarator(Box::new(declarator), dimension);
+                
+            } else {
+                break;
+            }
         }
+
+        Ok(declarator)
     }
 
     fn parse_simple_declarator(&mut self) -> Result<Declarator, ParseError> {
@@ -349,6 +380,10 @@ impl Parser {
                     },
                     _ => Err(ParseError::InvalidTypes(self.current_span))
                 }
+            },
+            Declarator::ArrayDeclarator(inner, size) => {
+                let derived_type = Type::Array(Box::new(base_type), size);
+                self.process_declarator(*inner, derived_type)
             }
         }
     }
@@ -408,10 +443,33 @@ impl Parser {
         let mut init = None;
         if !self.next_token_is(TokenType::Semicolon) {
             self.expect(TokenType::Equal)?;
-            init = Some(self.parse_expression(0)?);
+            init = Some(self.parse_init()?);
         }
         self.expect(TokenType::Semicolon)?;
         Ok(VarDeclaration{identifier, var_type, init, storage, span: self.current_span})
+    }
+
+    fn parse_init(&mut self) -> Result<Init, ParseError> {
+        let token = self.next_token_type()?;
+        let mut init = Vec::new();
+        match token {
+            TokenType::OpenBrace => {
+                self.expect(TokenType::OpenBrace)?;
+                init.push(Box::new(self.parse_init()?));
+                if !self.next_token_is(TokenType::CloseBrace) {
+                    self.expect(TokenType::Comma)?;
+                    while !self.next_token_is(TokenType::CloseBrace) {
+                        init.push(Box::new(self.parse_init()?));
+                        if !self.next_token_is(TokenType::CloseBrace) {
+                            self.expect(TokenType::Comma)?;
+                        }
+                    }
+                }
+                self.expect(TokenType::CloseBrace)?;
+                Ok(Init::C(init))
+            }, 
+            _ => Ok(Init::S(self.parse_expression(0)?)),
+        }
     }
 
     //////////////

@@ -118,7 +118,7 @@ fn check_block_for_decs(block: Block) -> Result<(), SemanticError> {
     Ok(())
 }
 
-fn eval_constant(expr: &ExpressionKind) -> Option<i128> {
+pub fn eval_constant(expr: &ExpressionKind) -> Option<i128> {
     match expr {
         // using lossy conversions here because it just needs to match the case
         ExpressionKind::Constant(c) =>  match c {
