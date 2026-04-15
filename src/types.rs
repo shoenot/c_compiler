@@ -10,7 +10,15 @@ pub enum Type {
     Double,
     Pointer(Box<Type>),
     FuncType{params: Vec<Box<Type>>, ret: Box<Type>},
+    Array(Box<Type>, i32),
 }
+
+static ARITHMETIC_TYPES: &[Type] = &[Type::Int, Type::Long,
+                                     Type::UInt, Type::ULong,
+                                     Type::Double];
+
+static INTEGER_TYPES: &[Type] = &[Type::Int, Type::Long,
+                                  Type::UInt, Type::ULong];
 
 impl Type {
     pub fn size(&self) -> usize {
@@ -22,6 +30,7 @@ impl Type {
             Type::Pointer(_) => 64,
             Type::Double => 64,
             Type::FuncType { .. } => unreachable!(),
+            Type::Array(t, s) => t.size() * *s as usize,
         }
     }
 
@@ -34,6 +43,7 @@ impl Type {
             Type::Pointer(_) => false,
             Type::Double => unreachable!(),
             Type::FuncType { .. } => unreachable!(),
+            Type::Array(_, _) => unreachable!(),
         }
     }
 
@@ -43,6 +53,18 @@ impl Type {
 
     pub fn is_double(&self) -> bool {
         matches!(self, Type::Double)
+    }
+
+    pub fn is_arithmetic(&self) -> bool {
+        ARITHMETIC_TYPES.contains(&self)
+    }
+
+    pub fn is_integer(&self) -> bool {
+        INTEGER_TYPES.contains(&self)
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.is_arithmetic() || self.is_pointer()
     }
 }
 

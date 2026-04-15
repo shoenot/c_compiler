@@ -1,5 +1,4 @@
 use std::iter::Peekable;
-use std::os::unix::process;
 use std::vec::IntoIter;
 use std::fmt;
 use crate::types::*;
@@ -137,7 +136,8 @@ impl TypeFlags {
 pub enum Declarator {
     Ident(String),
     PointerDeclarator(Box<Declarator>),
-    FuncDeclarator(Vec<Parameter>, Box<Declarator>)
+    FuncDeclarator(Vec<Parameter>, Box<Declarator>),
+    ArrayDeclarator(Box<Declarator>, i32),
 }
 
 #[derive(Debug, Clone)]

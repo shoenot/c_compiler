@@ -140,6 +140,8 @@ impl Tokenizer {
             ')' => TokenType::CloseParen,
             '{' => TokenType::OpenBrace,
             '}' => TokenType::CloseBrace,
+            '[' => TokenType::OpenSquare,
+            ']' => TokenType::CloseSquare,
             ';' => TokenType::Semicolon,
             '~' => TokenType::Tilde,
             '?' => TokenType::QuestionMark,

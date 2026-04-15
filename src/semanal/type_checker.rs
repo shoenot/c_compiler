@@ -4,13 +4,6 @@ use ordered_float::OrderedFloat;
 use super::*;
 use visitor_trait::*;
 
-static ARITHMETIC_TYPES: &[Type] = &[Type::Int, Type::Long,
-                                     Type::UInt, Type::ULong,
-                                     Type::Double];
-
-static INTEGER_TYPES: &[Type] = &[Type::Int, Type::Long,
-                                  Type::UInt, Type::ULong];
-
 impl Symbol {
     fn new_func(ident: String, ftype: Type, defined: bool, global: bool) -> Symbol {
         Symbol { ident, datatype: ftype, attrs: IdentAttrs::FuncAttr { defined, global } }
@@ -50,15 +43,17 @@ fn convert_type(expr: &mut Expression, datatype: Type) {
     }
 }
 
-pub fn dump_static_init(init: StaticInit) -> Const {
-    match init {
-        StaticInit::LongInit(i)     => Const::Long(i),
-        StaticInit::IntInit(i)      => Const::Int(i),
-        StaticInit::UIntInit(i)     => Const::UInt(i),
-        StaticInit::ULongInit(i)    => Const::ULong(i),
-        StaticInit::DoubleInit(i)   => Const::Double(i),
-    }
-}
+// Dont remember what i needed this for but i feel like ill need it in the future
+
+// pub fn dump_static_init(init: StaticInit) -> Const {
+//     match init {
+//         StaticInit::LongInit(i)     => Const::Long(i),
+//         StaticInit::IntInit(i)      => Const::Int(i),
+//         StaticInit::UIntInit(i)     => Const::UInt(i),
+//         StaticInit::ULongInit(i)    => Const::ULong(i),
+//         StaticInit::DoubleInit(i)   => Const::Double(i),
+//     }
+// }
 
 pub fn get_static_init(constant: Const) -> StaticInit {
     match constant {
@@ -225,7 +220,7 @@ impl<'a> TypeChecker<'a> {
         let exp_t = self.type_expression(expr)?;
         if exp_t == target {
             Ok(exp_t)
-        } else if ARITHMETIC_TYPES.contains(&exp_t) && ARITHMETIC_TYPES.contains(&target) {
+        } else if exp_t.is_arithmetic() && target.is_arithmetic() {
             convert_type(expr, target.clone());
             Ok(target)
         } else if is_null_ptr_const(expr) && matches!(target, Type::Pointer(_)) {
@@ -309,7 +304,7 @@ impl<'a> TypeChecker<'a> {
                 
                 check_binary_type(&common_type, &op, expr.span)?;
                 
-                if ARITHMETIC_TYPES.contains(&exp1_type) && ARITHMETIC_TYPES.contains(&exp2_type) {
+                if exp1_type.is_arithmetic() && exp2_type.is_arithmetic() {
                     if !matches!(op, BinaryOp::LeftShift | BinaryOp::RightShift) {
                         convert_type(exp2, common_type.clone());
                         *comp_type = Some(common_type);
@@ -335,10 +330,10 @@ impl<'a> TypeChecker<'a> {
                 let old_type = self.type_expression(factor)?;
                 let new_type = t.clone();
                 if new_type.is_pointer() || old_type.is_pointer() {
-                    if !old_type.is_pointer() && !INTEGER_TYPES.contains(&old_type) {
+                    if !old_type.is_pointer() && !old_type.is_integer() {
                         return Err(SemanticError::IncompatibleTypes(expr.span))
                     }
-                    if !new_type.is_pointer() && !INTEGER_TYPES.contains(&new_type) {
+                    if !new_type.is_pointer() && !new_type.is_integer() {
                         return Err(SemanticError::IncompatibleTypes(expr.span))
                     }
                 }

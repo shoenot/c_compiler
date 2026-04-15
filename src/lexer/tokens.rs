@@ -8,6 +8,8 @@ pub enum TokenType {
     CloseParen,
     OpenBrace,
     CloseBrace,
+    OpenSquare,
+    CloseSquare,
     Semicolon,
     Tilde,
     Plus,

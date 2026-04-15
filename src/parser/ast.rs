@@ -50,9 +50,15 @@ impl PartialEq for FuncDeclaration {
 pub struct VarDeclaration {
     pub identifier: String,
     pub var_type: Type,
-    pub init: Option<Expression>,
+    pub init: Option<Initializer>,
     pub storage: Option<StorageClass>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Initializer {
+    SingleInit(Expression),
+    CompoundInit(Vec<Box<Initializer>>)
 }
 
 impl PartialEq for VarDeclaration {
@@ -177,6 +183,7 @@ pub enum ExpressionKind {
     FunctionCall(String, Vec<Expression>),
     Dereference(Box<Expression>),
     AddrOf(Box<Expression>),
+    Subscript(exp, exp),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
