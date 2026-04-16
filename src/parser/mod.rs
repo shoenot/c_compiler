@@ -1,5 +1,4 @@
 use std::iter::Peekable;
-use std::os::unix::process;
 use std::vec::IntoIter;
 use std::fmt;
 use crate::types::*;
@@ -9,9 +8,7 @@ use crate::lexer::*;
 pub mod ast;
 pub use ast::*;
 pub mod expr;
-pub use expr::*;
 pub mod stmt;
-pub use stmt::*;
 
 #[derive(Debug)]
 pub enum ParseError {

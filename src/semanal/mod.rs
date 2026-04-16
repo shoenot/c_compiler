@@ -16,6 +16,10 @@ use switch_collector::*;
 mod loop_labeler;
 use loop_labeler::*;
 
+mod for_desugarer;
+use for_desugarer::*;
+
+// pub mod typed_ast;
 pub mod type_checker;
 pub use type_checker::*;
 
@@ -101,9 +105,10 @@ impl std::error::Error for SemanticError {}
 
 pub fn semantic_analysis(program: &mut Program, symbols: &mut HashMap<String, Symbol>) 
     -> Result<HashMap<String, MapEntry>, SemanticError> {
-    let map = identifier_resolution_pass(program)?;
     label_mangling_pass(program)?;
     loop_labeling_pass(program)?;
+    for_desugaring_pass(program)?;
+    let map = identifier_resolution_pass(program)?;
     type_checking_pass(program, symbols)?;
     switch_collection_pass(program)?;
     Ok(map)
