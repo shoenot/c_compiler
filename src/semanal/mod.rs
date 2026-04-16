@@ -22,8 +22,6 @@ pub use type_checker::*;
 mod label_mangler;
 use label_mangler::*;
 
-mod typed_ast;
-
 #[derive(Debug)]
 pub enum SemanticError {
     UseBeforeDeclaration(String, Span),
