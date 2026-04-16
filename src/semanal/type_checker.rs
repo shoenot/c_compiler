@@ -434,10 +434,16 @@ impl<'a> TypeChecker<'a> {
 
     fn type_and_convert_exp(&mut self, expr: &mut Expression) -> Result<Type, SemanticError> {
         let typed_expr = self.type_expression(expr)?;
-        match typed_expr.expression_type {
-            Type::Array(t, n) => {
-                let addr_exp = AddrOf
-            }
+        match &typed_expr.expression_type {
+            Some(Type::Array(t, _)) => {
+                *expr = Expression::new(
+                    ExpressionKind::AddrOf(Box::new(typed_expr.clone())),
+                    Some(Type::Pointer(t.clone())),
+                    expr.span);
+                Ok(Type::Pointer(t.clone()))
+            },
+            Some(other) => Ok(other.clone()),
+            None => unreachable!(),
         }
     }
 }  
