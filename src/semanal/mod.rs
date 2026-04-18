@@ -56,6 +56,7 @@ pub enum SemanticError {
     NonPointerDeref(Span),
     IncompatibleTypes(Span),
     InvalidPointerOp(Span),
+    ReturnArray(Span),
 }
 
 impl fmt::Display for SemanticError {
@@ -93,6 +94,7 @@ impl fmt::Display for SemanticError {
             SemanticError::NonPointerDeref(s) => write!(f, "Deref operator with non pointer at {}", s),
             SemanticError::IncompatibleTypes(s) => write!(f, "Incompatible types at {}", s),
             SemanticError::InvalidPointerOp(s) => write!(f, "Invalid operation on object of pointer type at {}", s),
+            SemanticError::ReturnArray(s) => write!(f, "Invalid function return type (array) at {}", s),
         }
     }
 }

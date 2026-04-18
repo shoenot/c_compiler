@@ -329,6 +329,7 @@ impl<'a> TypeChecker<'a> {
             ExpressionKind::Cast(t, factor) => {
                 let old_type = self.type_convert_expr(factor)?;
                 let new_type = t.clone();
+                if t.is_array() { return Err(SemanticError::IncompatibleTypes(expr.span)) }
                 if new_type.is_pointer() || old_type.is_pointer() {
                     if !old_type.is_pointer() && !INTEGER_TYPES.contains(&old_type) {
                         return Err(SemanticError::IncompatibleTypes(expr.span))
@@ -385,7 +386,24 @@ impl<'a> TypeChecker<'a> {
                         Ok(set_type(expr, exp1_type))
                     } 
 
-                    if matches!(op, BinaryOp::Add | BinaryOp::Subtract) {
+                    else if matches!(op, BinaryOp::Add) {
+                        if (exp1_type.is_pointer() && exp2_type.is_integer()) ^ (exp2_type.is_pointer() && exp1_type.is_integer()) {
+                            convert_type(&mut expr, Type::Long);
+                            Ok(set_type(expr, exp1_type))
+                        } else {
+                            Err(SemanticError::InvalidPointerOp(expr.span))
+                        }
+                    }
+
+                    else if matches!(op, BinaryOp::Subtract) {
+                        if exp1_type.is_pointer() && exp2_type.is_integer() {
+                            convert_type(&mut expr, Type::Long);
+                            Ok(set_type(expr, exp1_type))
+                        } else if t1.is_pointer() && t1 == t2 {
+                            Ok(set_type(expr, Type::Long))
+                        } else {
+                            Err(SemanticError::InvalidPointerOp(expr.span))
+                        }
                     }
 
                     else { Ok(set_type(expr, common_type)) }
@@ -430,10 +448,22 @@ impl<'a> TypeChecker<'a> {
                     Err(SemanticError::InvalidLValue(expr.span))
                 }
             },
+            ExpressionKind::Subscript(exp1, exp2) => {
+                let e1t = self.type_convert_exp(exp1)?;
+                let e2t = self.type_convert_exp(exp2)?;
+                let ptr_type = if e1t.is_pointer() && e2t.is_integer() {
+                    convert_type(exp2, Type::Long);
+                    e1t
+                } else if e1t.is_integer() && e2t.is_pointer() {
+                    convert_type(exp1, Type::Long);
+                    e2t
+                } else {
+                    return Err(SemanticError::InvalidPointerOp(expr.span))
+                };
+                Ok(set_type(exp1, ptr_type))
+            }
         }
     }
-
-}
 
     fn type_convert_exp(&mut self, expr: &mut Expression) -> Result<Type, SemanticError> {
         let expr_type = self.type_expression(expr)?;
@@ -458,6 +488,8 @@ impl<'a> Visitor for TypeChecker<'a> {
             Some(StorageClass::Static) => false,
             _ => true,
         };
+
+        if function.func_type.is_array() { return Err(SemanticError::ReturnArray(function.span)) }
 
         if let Some(old) = self.symbols.get(&function.identifier) {
             if let IdentAttrs::FuncAttr { defined: olddef, global: oldglobal } = old.attrs {

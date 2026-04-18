@@ -13,11 +13,11 @@ pub enum Type {
     Array(Box<Type>, i64),
 }
 
-static ARITHMETIC_TYPES: &[Type] = &[Type::Int, Type::Long,
+pub static ARITHMETIC_TYPES: &[Type] = &[Type::Int, Type::Long,
                                      Type::UInt, Type::ULong,
                                      Type::Double];
 
-static INTEGER_TYPES: &[Type] = &[Type::Int, Type::Long,
+pub static INTEGER_TYPES: &[Type] = &[Type::Int, Type::Long,
                                   Type::UInt, Type::ULong];
 
 impl Type {
@@ -53,6 +53,10 @@ impl Type {
 
     pub fn is_double(&self) -> bool {
         matches!(self, Type::Double)
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(self, Type::Array(_, _))
     }
 
     pub fn is_arithmetic(&self) -> bool {
