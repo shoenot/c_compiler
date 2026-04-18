@@ -42,17 +42,15 @@ fn convert_type(expr: &mut Expression, datatype: Type) {
     }
 }
 
-// Dont remember what i needed this for but i feel like ill need it in the future
-
-// pub fn dump_static_init(init: StaticInit) -> Const {
-//     match init {
-//         StaticInit::LongInit(i)     => Const::Long(i),
-//         StaticInit::IntInit(i)      => Const::Int(i),
-//         StaticInit::UIntInit(i)     => Const::UInt(i),
-//         StaticInit::ULongInit(i)    => Const::ULong(i),
-//         StaticInit::DoubleInit(i)   => Const::Double(i),
-//     }
-// }
+pub fn dump_static_init(init: StaticInit) -> Const {
+    match init {
+        StaticInit::LongInit(i)     => Const::Long(i),
+        StaticInit::IntInit(i)      => Const::Int(i),
+        StaticInit::UIntInit(i)     => Const::UInt(i),
+        StaticInit::ULongInit(i)    => Const::ULong(i),
+        StaticInit::DoubleInit(i)   => Const::Double(i),
+    }
+}
 
 pub fn get_static_init(constant: Const) -> StaticInit {
     match constant {
